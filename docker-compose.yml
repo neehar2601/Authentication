@@ -1,0 +1,62 @@
+# AuthLab local lab: Keycloak + Postgres + Flask resource API
+# Local development only. Ports are bound to 127.0.0.1 on purpose.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0   # pinned; bump deliberately
+    command: start-dev                      # dev mode: never use in production
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_ADMIN_USER}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD}
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: ./api
+    environment:
+      # Issuer must match the URL the browser/curl used to get the token (localhost).
+      # JWKS is fetched over the Docker network (keycloak), which is a different hostname.
+      TOKEN_ISSUER: http://localhost:8080/realms/authlab
+      JWKS_URL: http://keycloak:8080/realms/authlab/protocol/openid-connect/certs
+      API_AUDIENCE: authlab-api
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      KEYCLOAK_REALM: authlab
+      KC_ADMIN_USER: ${KC_ADMIN_USER}
+      KC_ADMIN_PASSWORD: ${KC_ADMIN_PASSWORD}
+    ports:
+      - "127.0.0.1:5001:5000"
+    depends_on:
+      - keycloak
+
+  frontend:
+    image: nginx:alpine
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+    ports:
+      - "127.0.0.1:3000:80"
+    depends_on:
+      - api
+      - keycloak
+
+volumes:
+  pgdata:

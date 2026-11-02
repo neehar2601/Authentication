@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AuthLab — Security & Access X-Ray</title>
+  <meta name="description" content="Visual X-Ray of OAuth 2.0 and JWT verification: enter username and password to log in, request access, and see live security errors and decisions.">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛡️</text></svg>">
+</head>
+<body>
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-container">
+      <div class="brand-section">
+        <div class="brand-icon">🛡️</div>
+        <div>
+          <h1 class="brand-title">AuthLab</h1>
+        </div>
+        <span class="brand-tag">Security &amp; Access X-Ray</span>
+      </div>
+      
+      <div class="system-status">
+        <button type="button" class="btn-secondary" onclick="document.getElementById('admin-console-section').scrollIntoView({ behavior: 'smooth' })" style="padding: 0.35rem 0.8rem; font-size: 0.78rem; border-radius: var(--radius-full); display: flex; align-items: center; gap: 0.4rem; border-color: rgba(245, 158, 11, 0.35); color: #fcd34d; background: rgba(245, 158, 11, 0.1);">
+          <span>🛡️</span> Admin User Console
+        </button>
+        <a href="http://localhost:8080/admin" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="padding: 0.35rem 0.8rem; font-size: 0.78rem; border-radius: var(--radius-full); display: flex; align-items: center; gap: 0.4rem; text-decoration: none; color: #a5b4fc; border-color: rgba(99, 102, 241, 0.35); background: rgba(99, 102, 241, 0.1);">
+          <span>↗</span> Keycloak Admin (:8080)
+        </a>
+        <div class="status-pill" id="keycloak-status-pill">
+          <span class="status-dot" id="keycloak-status-dot"></span>
+          <span>Keycloak: <strong id="keycloak-status-text">Connecting...</strong></span>
+        </div>
+        <div class="status-pill" id="api-status-pill">
+          <span class="status-dot" id="api-status-dot"></span>
+          <span>Flask API: <strong id="api-status-text">Connecting...</strong></span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="main-layout" style="max-width: 1380px; gap: 1.5rem; padding: 1.5rem;">
+
+    <!-- TOP SECTION: TWO-COLUMN INTERACTIVE LOGIN & ACCESS X-RAY -->
+    <div class="login-layout-grid" style="display: grid; grid-template-columns: 460px 1fr; gap: 1.5rem; align-items: start;">
+      
+      <!-- LEFT COLUMN: AUTHENTIC LOGIN, REGISTRATION & RESOURCE ACCESS FORM -->
+      <section class="glass-panel" style="padding: 1.75rem;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
+          <h2 style="font-size: 1.25rem; font-family: var(--font-heading); display: flex; align-items: center; gap: 0.5rem;">
+            <span id="auth-panel-icon">🔐</span> <span id="auth-panel-title">User Login &amp; Access</span>
+          </h2>
+          <span id="auth-panel-badge" style="font-size: 0.72rem; padding: 0.2rem 0.55rem; border-radius: var(--radius-full); background: rgba(99, 102, 241, 0.15); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.3);">
+            Keycloak Direct Grant
+          </span>
+        </div>
+
+        <!-- Mode Switcher Tabs: Login vs Register -->
+        <div class="auth-mode-tabs" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; background: rgba(0, 0, 0, 0.35); padding: 0.3rem; border-radius: var(--radius-md); border: 1px solid var(--border-subtle); margin-bottom: 1.25rem;">
+          <button type="button" id="tab-mode-login" class="auth-mode-btn active" onclick="switchAuthMode('login')">
+            <span>🔐</span> Sign In &amp; Access
+          </button>
+          <button type="button" id="tab-mode-register" class="auth-mode-btn" onclick="switchAuthMode('register')">
+            <span>✨</span> Register New User
+          </button>
+        </div>
+
+        <!-- ==================== VIEW 1: LOGIN & ACCESS ==================== -->
+        <div id="view-login-mode">
+          <p style="font-size: 0.83rem; color: var(--text-secondary); margin-bottom: 1.25rem; line-height: 1.45;">
+            Enter credentials and select a resource. When you click <strong>Login &amp; Request Access</strong>, the system authenticates against Keycloak, requests the resource from Flask, and displays the exact security decision or error.
+          </p>
+
+          <!-- Quick Demo Fill Buttons -->
+          <div style="margin-bottom: 1.25rem;">
+            <label style="font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); display: block; margin-bottom: 0.45rem;">
+              Quick Fill Keycloak Accounts:
+            </label>
+            <div id="quick-fill-accounts-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+              <button type="button" class="quick-fill-btn active" id="btn-quick-alice" onclick="quickFillCredentials('alice', 'alice123', 'viewer')">
+                <span>👩‍💻</span>
+                <div style="text-align: left;">
+                  <div style="font-weight: 600;">Alice (Viewer)</div>
+                  <div style="font-size: 0.7rem; color: #93c5fd;">Gets 403 on Admin</div>
+                </div>
+              </button>
+              <button type="button" class="quick-fill-btn" id="btn-quick-bob" onclick="quickFillCredentials('bob', 'bob123', 'admin')">
+                <span>🛡️</span>
+                <div style="text-align: left;">
+                  <div style="font-weight: 600;">Bob (Admin)</div>
+                  <div style="font-size: 0.7rem; color: #fcd34d;">Gets 200 on Admin</div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <!-- The Actual Login Form -->
+          <form id="login-form" onsubmit="handleLoginAndAccess(event)" style="display: flex; flex-direction: column; gap: 1rem;">
+            <!-- Username Input -->
+            <div class="form-group">
+              <label class="form-label" for="login-username" style="display: flex; justify-content: space-between;">
+                <span>Username</span>
+                <span style="font-size: 0.72rem; color: var(--text-muted);">Keycloak realm user</span>
+              </label>
+              <div style="position: relative;">
+                <span style="position: absolute; left: 0.85rem; top: 50%; transform: translateY(-50%); font-size: 1rem; color: var(--text-muted); pointer-events: none;">👤</span>
+                <input type="text" id="login-username" class="form-input" value="alice" placeholder="e.g. alice, bob" required style="padding-left: 2.5rem;">
+              </div>
+            </div>
+
+            <!-- Password Input -->
+            <div class="form-group">
+              <label class="form-label" for="login-password" style="display: flex; justify-content: space-between;">
+                <span>Password</span>
+                <span style="font-size: 0.72rem; color: var(--text-muted);">Default: alice123 / bob123</span>
+              </label>
+              <div style="position: relative;">
+                <span style="position: absolute; left: 0.85rem; top: 50%; transform: translateY(-50%); font-size: 1rem; color: var(--text-muted); pointer-events: none;">🔑</span>
+                <input type="password" id="login-password" class="form-input" value="alice123" placeholder="Enter password" required style="padding-left: 2.5rem;">
+              </div>
+            </div>
+
+            <!-- Target Resource Selector -->
+            <div class="form-group">
+              <label class="form-label" for="target-endpoint" style="display: flex; justify-content: space-between;">
+                <span>Target Resource to Access</span>
+                <span style="font-size: 0.72rem; color: #f87171; font-weight: 600;">Test 403 on Admin!</span>
+              </label>
+              <select id="target-endpoint" class="form-input" style="background-color: var(--bg-surface); cursor: pointer; font-family: var(--font-mono); font-size: 0.85rem;">
+                <option value="/api/admin/users" selected>GET /api/admin/users  (Admin only — triggers 403 for Alice!)</option>
+                <option value="/api/users">GET /api/users  (Viewer / Developer / Admin — 200 OK)</option>
+                <option value="/api/me">GET /api/me  (Identity Profile — 200 OK)</option>
+                <option value="/api/public">GET /api/public  (Public — No auth needed)</option>
+              </select>
+            </div>
+
+            <!-- Action Buttons -->
+            <div style="display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.5rem;">
+              <button type="submit" id="btn-submit-login" class="btn-primary" style="padding: 0.85rem 1.25rem; font-size: 0.95rem; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 0.5rem; box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);">
+                <span>🔐</span>
+                <span id="btn-submit-text">Login &amp; Request Access</span>
+              </button>
+              <button type="button" class="btn-secondary" onclick="testAnonymousAccess()" style="padding: 0.65rem 1rem; font-size: 0.82rem; display: flex; align-items: center; justify-content: center; gap: 0.4rem; color: var(--text-secondary);">
+                <span>🚫</span>
+                <span>Test Access Without Token (Anonymous 401)</span>
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- ==================== VIEW 2: REGISTER NEW USER ==================== -->
+        <div id="view-register-mode" style="display: none;">
+          <p style="font-size: 0.83rem; color: var(--text-secondary); margin-bottom: 1.15rem; line-height: 1.45;">
+            Provision a new user directly in the <strong>Keycloak</strong> <code>authlab</code> realm via the Admin REST API, assign a realm role, and immediately test their JWT &amp; RBAC permissions.
+          </p>
+
+          <form id="register-form" onsubmit="handleRegisterUser(event)" style="display: flex; flex-direction: column; gap: 0.95rem;">
+            <!-- New Username -->
+            <div class="form-group">
+              <label class="form-label" for="reg-username" style="display: flex; justify-content: space-between;">
+                <span>New Username *</span>
+                <span style="font-size: 0.72rem; color: var(--text-muted);">Lowercase, no spaces</span>
+              </label>
+              <div style="position: relative;">
+                <span style="position: absolute; left: 0.85rem; top: 50%; transform: translateY(-50%); font-size: 1rem; color: var(--text-muted); pointer-events: none;">👤</span>
+                <input type="text" id="reg-username" class="form-input" placeholder="e.g. charlie" required minlength="2" style="padding-left: 2.5rem;">
+              </div>
+            </div>
+
+            <!-- New Password -->
+            <div class="form-group">
+              <label class="form-label" for="reg-password" style="display: flex; justify-content: space-between;">
+                <span>Password *</span>
+                <span style="font-size: 0.72rem; color: var(--text-muted);">Min 4 characters</span>
+              </label>
+              <div style="position: relative;">
+                <span style="position: absolute; left: 0.85rem; top: 50%; transform: translateY(-50%); font-size: 1rem; color: var(--text-muted); pointer-events: none;">🔑</span>
+                <input type="password" id="reg-password" class="form-input" placeholder="e.g. charlie123" required minlength="4" style="padding-left: 2.5rem;">
+              </div>
+            </div>
+
+            <!-- Email (Optional) -->
+            <div class="form-group">
+              <label class="form-label" for="reg-email" style="display: flex; justify-content: space-between;">
+                <span>Email</span>
+                <span style="font-size: 0.72rem; color: var(--text-muted);">Optional (auto-generated if blank)</span>
+              </label>
+              <div style="position: relative;">
+                <span style="position: absolute; left: 0.85rem; top: 50%; transform: translateY(-50%); font-size: 1rem; color: var(--text-muted); pointer-events: none;">✉️</span>
+                <input type="email" id="reg-email" class="form-input" placeholder="e.g. charlie@authlab.local" style="padding-left: 2.5rem;">
+              </div>
+            </div>
+
+            <!-- Keycloak Realm Role Selector -->
+            <div class="form-group">
+              <label class="form-label" for="reg-role" style="display: flex; justify-content: space-between;">
+                <span>Keycloak Realm Role</span>
+                <span style="font-size: 0.72rem; color: #a5b4fc; font-weight: 600;">Embedded in JWT realm_access</span>
+              </label>
+              <select id="reg-role" class="form-input" style="background-color: var(--bg-surface); cursor: pointer; font-family: var(--font-mono); font-size: 0.83rem;">
+                <option value="viewer" selected>viewer — Read access (/api/users ✓, /api/admin/users ✗ 403)</option>
+                <option value="developer">developer — Dev access (/api/users ✓, /api/admin/users ✗ 403)</option>
+                <option value="admin">admin — Full access (/api/users ✓, /api/admin/users ✓ 200)</option>
+              </select>
+            </div>
+
+            <!-- Registration Feedback Box -->
+            <div id="register-feedback" style="display: none; padding: 0.75rem 0.9rem; border-radius: var(--radius-md); font-size: 0.8rem; line-height: 1.45;"></div>
+
+            <!-- Submit Button -->
+            <div style="display: flex; flex-direction: column; gap: 0.6rem; margin-top: 0.35rem;">
+              <button type="submit" id="btn-submit-register" class="btn-primary" style="padding: 0.85rem 1.25rem; font-size: 0.95rem; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 0.5rem; background: linear-gradient(135deg, #10b981, #059669); box-shadow: 0 4px 15px rgba(16, 185, 129, 0.35);">
+                <span>✨</span>
+                <span id="btn-submit-register-text">Register in Keycloak &amp; Sign In</span>
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <!-- Active Session Pill -->
+        <div style="margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--border-subtle);">
+          <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.78rem; margin-bottom: 0.4rem;">
+            <span style="color: var(--text-muted);">Current Active Session:</span>
+            <span id="session-countdown-text" style="font-family: var(--font-mono); color: var(--success); font-weight: 600;">No token yet</span>
+          </div>
+          <div style="background: rgba(0,0,0,0.3); border-radius: var(--radius-sm); padding: 0.6rem 0.85rem; display: flex; align-items: center; justify-content: space-between;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span id="session-avatar" style="font-size: 1.1rem;">👩‍💻</span>
+              <div>
+                <div style="font-weight: 600; font-size: 0.85rem; color: #fff;" id="session-username-display">alice</div>
+                <div style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono);" id="session-roles-display">roles: ["viewer"]</div>
+              </div>
+            </div>
+            <span class="decision-badge dec-ALLOWED" id="session-badge" style="font-size: 0.68rem;">READY</span>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- RIGHT COLUMN: ACCESS DECISION, VERIFIED API DATA, & BEHIND-THE-SCENES X-RAY -->
+      <section style="display: flex; flex-direction: column; gap: 1.25rem;">
+        
+        <!-- 1. ACCESS DECISION HERO BANNER (Big visual result: 403 Forbidden or 200 OK) -->
+        <div class="xray-decision-banner access-denied" id="decision-banner">
+          <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem;">
+            <div style="display: flex; align-items: flex-start; gap: 1rem;">
+              <div class="decision-icon-circle" id="decision-icon">
+                🚫
+              </div>
+              <div>
+                <div style="display: flex; align-items: center; gap: 0.65rem; margin-bottom: 0.35rem;">
+                  <span class="decision-code-badge badge-403" id="decision-status-badge">HTTP 403 FORBIDDEN</span>
+                  <span style="font-weight: 700; font-size: 1.2rem; color: #fff;" id="decision-headline">Access Denied</span>
+                </div>
+                <p style="font-size: 0.88rem; color: #f1f5f9; line-height: 1.5;" id="decision-explanation">
+                  Authentication succeeded with Keycloak (valid RS256 token signed for <strong>alice</strong>), but Flask RBAC decorator <code>@require_auth("admin")</code> checked your roles <code>["viewer"]</code> and <strong>rejected access</strong>.
+                </p>
+              </div>
+            </div>
+            <div style="text-align: right; flex-shrink: 0;">
+              <span style="font-size: 0.72rem; color: var(--text-muted); display: block;">Latency</span>
+              <span style="font-family: var(--font-mono); font-size: 0.95rem; font-weight: 700; color: #fff;" id="decision-latency">5ms</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. VERIFIED REAL DATA RETURNED BY FLASK API -->
+        <div class="glass-panel" style="padding: 1.25rem 1.5rem;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span style="font-size: 1.1rem;">📦</span>
+              <h3 style="font-size: 1rem; font-family: var(--font-heading); color: #fff;">
+                Verified Live Response from Flask API
+              </h3>
+              <span style="font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono);" id="data-target-url">
+                GET http://localhost:5001/api/admin/users
+              </span>
+            </div>
+            <button class="suite-copy-btn" onclick="copyTraceCurl()" title="Copy equivalent cURL command">
+              📋 Copy cURL
+            </button>
+          </div>
+
+          <pre class="verified-data-box" id="verified-live-data" style="margin: 0; min-height: 110px; max-height: 220px; overflow-y: auto;">{
+  "error": "forbidden",
+  "detail": "Requires one of: admin"
+}</pre>
+        </div>
+
+        <!-- 3. BEHIND-THE-SCENES SECURITY X-RAY TRACE -->
+        <div class="glass-panel" style="padding: 1.25rem 1.5rem;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.85rem;">
+            <h3 style="font-size: 1rem; font-family: var(--font-heading); display: flex; align-items: center; gap: 0.5rem; color: #fff;">
+              <span>🔬</span> Behind-the-Scenes Security X-Ray
+            </h3>
+            <span style="font-size: 0.72rem; color: var(--text-secondary);">
+              Step-by-step cryptographic &amp; RBAC validation
+            </span>
+          </div>
+
+          <div class="xray-pipeline-grid" style="grid-template-columns: repeat(3, 1fr); gap: 0.85rem;">
+            <!-- Step 1: Keycloak Token Minting -->
+            <div class="xray-step-card" style="padding: 0.85rem 1rem;">
+              <div class="xray-step-header" style="margin-bottom: 0.4rem;">
+                <span class="xray-step-num">STEP 1</span>
+                <span style="font-size: 0.72rem; color: #a5b4fc; font-weight: 600;">Keycloak IdP (:8080)</span>
+              </div>
+              <div style="font-size: 0.82rem; font-weight: 600; color: #fff; margin-bottom: 0.25rem;">Token Minting &amp; Signing</div>
+              <div class="xray-step-detail" style="font-size: 0.75rem; line-height: 1.45;">
+                <div>• User: <strong id="trace-step1-user" style="color: #93c5fd;">alice</strong></div>
+                <div>• Roles: <code id="trace-step1-roles" style="color: #fcd34d;">["viewer"]</code></div>
+                <div>• Alg: <code style="color: var(--jwt-header);">RS256</code> (RSA-2048)</div>
+              </div>
+              <div class="xray-step-status status-ok" id="trace-step1-badge" style="margin-top: 0.5rem; font-size: 0.72rem;">✓ Token Issued</div>
+            </div>
+
+            <!-- Step 2: Flask Signature Check -->
+            <div class="xray-step-card" style="padding: 0.85rem 1rem;">
+              <div class="xray-step-header" style="margin-bottom: 0.4rem;">
+                <span class="xray-step-num">STEP 2</span>
+                <span style="font-size: 0.72rem; color: #34d399; font-weight: 600;">Flask API (:5001)</span>
+              </div>
+              <div style="font-size: 0.82rem; font-weight: 600; color: #fff; margin-bottom: 0.25rem;">Cryptographic JWKS Check</div>
+              <div class="xray-step-detail" style="font-size: 0.75rem; line-height: 1.45;">
+                <div>• Key ID: <code id="trace-step2-kid" style="color: #a5b4fc;">cached</code></div>
+                <div>• Signature: <span id="trace-step2-sig" style="color: var(--success);">SHA-256 Valid ✓</span></div>
+                <div>• Expiration: <span id="trace-step2-exp" style="color: var(--success);">Active ✓</span></div>
+              </div>
+              <div class="xray-step-status status-ok" id="trace-step2-badge" style="margin-top: 0.5rem; font-size: 0.72rem;">✓ Signature Valid</div>
+            </div>
+
+            <!-- Step 3: RBAC Check -->
+            <div class="xray-step-card" style="padding: 0.85rem 1rem;">
+              <div class="xray-step-header" style="margin-bottom: 0.4rem;">
+                <span class="xray-step-num">STEP 3</span>
+                <span style="font-size: 0.72rem; color: #f59e0b; font-weight: 600;">Flask RBAC</span>
+              </div>
+              <div style="font-size: 0.82rem; font-weight: 600; color: #fff; margin-bottom: 0.25rem;">Role Permission Decision</div>
+              <div class="xray-step-detail" style="font-size: 0.75rem; line-height: 1.45;">
+                <div>• Required: <code id="trace-step3-req" style="color: #f87171;">admin</code></div>
+                <div>• Provided: <code id="trace-step3-prov" style="color: #fcd34d;">viewer</code></div>
+                <div>• Decision: <strong id="trace-step3-dec" style="color: var(--danger);">Denied (403)</strong></div>
+              </div>
+              <div class="xray-step-status status-err" id="trace-step3-badge" style="margin-top: 0.5rem; font-size: 0.72rem; background: rgba(239, 68, 68, 0.2); color: #f87171;">✗ Access Denied</div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+    </div>
+
+
+    <!-- ==================== ADMIN KEYCLOAK USER & PASSWORD MANAGEMENT CONSOLE ==================== -->
+    <section class="glass-panel" id="admin-console-section" style="padding: 1.5rem 1.75rem; border-color: rgba(245, 158, 11, 0.25);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
+        <div>
+          <div style="display: flex; align-items: center; gap: 0.65rem; flex-wrap: wrap;">
+            <h2 style="font-size: 1.2rem; font-family: var(--font-heading); display: flex; align-items: center; gap: 0.5rem; color: #fff;">
+              <span>🛡️</span> Admin Keycloak User &amp; Password Console
+            </h2>
+            <span class="access-decision-badge badge-denied" id="admin-console-badge">LOCKED (REQUIRES ADMIN ROLE)</span>
+          </div>
+          <p style="font-size: 0.82rem; color: var(--text-secondary); margin-top: 0.25rem;">
+            Manage Keycloak realm users, reset login passwords, update RBAC roles, and toggle account status via <code>@require_auth("admin")</code> protected endpoints.
+          </p>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+          <button type="button" id="btn-unlock-admin-bob" class="btn-primary" onclick="unlockAdminAsBob()" style="padding: 0.5rem 0.95rem; font-size: 0.8rem; background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);">
+            <span>🛡️</span> Switch to Bob (Admin) to Unlock
+          </button>
+          <button type="button" class="btn-secondary" onclick="switchAuthMode('register'); document.getElementById('reg-username')?.focus();" style="padding: 0.45rem 0.85rem; font-size: 0.8rem; display: flex; align-items: center; gap: 0.35rem;">
+            <span>➕</span> Register User
+          </button>
+          <button type="button" class="btn-secondary" onclick="refreshAllEndpoints()" style="padding: 0.45rem 0.85rem; font-size: 0.8rem; display: flex; align-items: center; gap: 0.35rem;">
+            <span>↺</span> Sync Keycloak Users
+          </button>
+          <a href="http://localhost:8080/admin/master/console/#/authlab/users" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="padding: 0.45rem 0.85rem; font-size: 0.8rem; display: flex; align-items: center; gap: 0.35rem; text-decoration: none;">
+            <span>↗</span> Native Keycloak UI
+          </a>
+        </div>
+      </div>
+
+      <!-- Admin Action Feedback Banner -->
+      <div id="admin-action-feedback" style="display: none; margin-bottom: 1rem; padding: 0.75rem 1rem; border-radius: var(--radius-md); font-size: 0.82rem; line-height: 1.45;"></div>
+
+      <!-- Locked State (Shown when active session is not Admin) -->
+      <div id="admin-console-locked" class="portal-admin-locked-box" style="padding: 1.75rem 1.5rem;">
+        <div class="portal-admin-locked-icon">🔒</div>
+        <div style="font-family: var(--font-heading); font-size: 1.1rem; font-weight: 700; color: #fff;">
+          Keycloak Admin Management Locked (<span id="admin-locked-reason-code">HTTP 403 FORBIDDEN</span>)
+        </div>
+        <p style="font-size: 0.84rem; color: var(--text-secondary); max-width: 620px; line-height: 1.5;" id="admin-locked-reason-desc">
+          Your current session does not hold the <code>admin</code> role in its Keycloak JWT. Flask API blocks access to <code>/api/admin/users</code> and password reset endpoints.
+        </p>
+        <button type="button" class="btn-primary" onclick="unlockAdminAsBob()" style="margin-top: 0.35rem; background: linear-gradient(135deg, #f59e0b, #d97706); box-shadow: 0 4px 15px rgba(245, 158, 11, 0.35);">
+          <span>🛡️</span> Sign In as Bob (Admin) &amp; Unlock Console
+        </button>
+      </div>
+
+      <!-- Unlocked State (Shown when active session has 'admin' role) -->
+      <div id="admin-console-unlocked" style="display: none;">
+        <div class="logs-table-wrapper">
+          <table class="logs-table">
+            <thead>
+              <tr>
+                <th>Keycloak User</th>
+                <th>Email &amp; UUID</th>
+                <th>Login Status</th>
+                <th>Keycloak Realm Role</th>
+                <th>Reset Login Password (Keycloak)</th>
+                <th style="text-align: right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="admin-users-tbody">
+              <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">
+                  Loading Keycloak realm users...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+
+    <!-- BOTTOM SECTION: FULL 4-ENDPOINT LIVE MATRIX FOR CURRENT SESSION -->
+    <section class="glass-panel" style="padding: 1.5rem 1.75rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+        <div>
+          <h2 style="font-size: 1.15rem; font-family: var(--font-heading); display: flex; align-items: center; gap: 0.5rem;">
+            <span>🎯</span> All 4 Endpoints Live Access Matrix
+          </h2>
+          <p style="font-size: 0.82rem; color: var(--text-secondary); margin-top: 2px;">
+            Live results across all Flask routes for the currently authenticated session:
+          </p>
+        </div>
+        <button class="btn-secondary" onclick="refreshAllEndpoints()" style="display: flex; align-items: center; gap: 0.4rem; padding: 0.45rem 0.85rem; font-size: 0.8rem;">
+          <span>↺</span> Refresh All Routes
+        </button>
+      </div>
+
+      <!-- 4 Target Endpoint Cards Grid -->
+      <div class="xray-endpoints-grid">
+        
+        <!-- ENDPOINT 1: /api/public -->
+        <div class="xray-access-card access-granted" id="card-endpoint-public">
+          <div class="access-card-header">
+            <div class="endpoint-title-row">
+              <span class="method-badge">GET</span>
+              <span class="endpoint-route">/api/public</span>
+              <span class="access-tag">Public Endpoint</span>
+            </div>
+            <span class="access-decision-badge badge-granted" id="badge-endpoint-public">ACCESS GRANTED (200 OK)</span>
+          </div>
+          <div class="access-card-body">
+            <div class="access-xray-reason">
+              <strong>X-Ray Decision:</strong> No <code>@require_auth</code> decorator. Accessible to any client without a token.
+            </div>
+            <div class="verified-data-section">
+              <div class="verified-data-label">
+                <span>Verified Data Returned by Flask:</span>
+                <span style="font-size: 0.7rem; color: var(--text-muted);" id="latency-endpoint-public">4ms</span>
+              </div>
+              <pre class="verified-data-box" id="data-endpoint-public">// Loading live data...</pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- ENDPOINT 2: /api/me -->
+        <div class="xray-access-card access-granted" id="card-endpoint-me">
+          <div class="access-card-header">
+            <div class="endpoint-title-row">
+              <span class="method-badge">GET</span>
+              <span class="endpoint-route">/api/me</span>
+              <span class="access-tag">Identity Profile</span>
+            </div>
+            <span class="access-decision-badge badge-granted" id="badge-endpoint-me">ACCESS GRANTED (200 OK)</span>
+          </div>
+          <div class="access-card-body">
+            <div class="access-xray-reason" id="xray-reason-me">
+              <strong>X-Ray Decision:</strong> Valid RS256 signature verified against Keycloak JWKS. User identity unpacked.
+            </div>
+            <div class="verified-data-section">
+              <div class="verified-data-label">
+                <span>Verified Data Returned by Flask:</span>
+                <span style="font-size: 0.7rem; color: var(--text-muted);" id="latency-endpoint-me">5ms</span>
+              </div>
+              <pre class="verified-data-box" id="data-endpoint-me">// Loading live data...</pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- ENDPOINT 3: /api/users -->
+        <div class="xray-access-card access-granted" id="card-endpoint-users">
+          <div class="access-card-header">
+            <div class="endpoint-title-row">
+              <span class="method-badge">GET</span>
+              <span class="endpoint-route">/api/users</span>
+              <span class="access-tag">User Directory</span>
+            </div>
+            <span class="access-decision-badge badge-granted" id="badge-endpoint-users">ACCESS GRANTED (200 OK)</span>
+          </div>
+          <div class="access-card-body">
+            <div class="access-xray-reason" id="xray-reason-users">
+              <strong>X-Ray Decision:</strong> Requires role <code>viewer</code>, <code>developer</code>, or <code>admin</code>. Role check passed.
+            </div>
+            <div class="verified-data-section">
+              <div class="verified-data-label">
+                <span>Verified Data Returned by Flask:</span>
+                <span style="font-size: 0.7rem; color: var(--text-muted);" id="latency-endpoint-users">5ms</span>
+              </div>
+              <pre class="verified-data-box" id="data-endpoint-users">// Loading live data...</pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- ENDPOINT 4: /api/admin/users -->
+        <div class="xray-access-card access-denied" id="card-endpoint-admin">
+          <div class="access-card-header">
+            <div class="endpoint-title-row">
+              <span class="method-badge">GET</span>
+              <span class="endpoint-route">/api/admin/users</span>
+              <span class="access-tag" style="color: #f87171;">Admin Only</span>
+            </div>
+            <span class="access-decision-badge badge-denied" id="badge-endpoint-admin">ACCESS DENIED (403 FORBIDDEN)</span>
+          </div>
+          <div class="access-card-body">
+            <div class="access-xray-reason" id="xray-reason-admin">
+              <strong>X-Ray Decision:</strong> Strictly requires role <code>admin</code>. Alice is authenticated, but lacks admin privileges.
+            </div>
+            <div class="verified-data-section">
+              <div class="verified-data-label">
+                <span>Verified Data Returned by Flask:</span>
+                <span style="font-size: 0.7rem; color: var(--text-muted);" id="latency-endpoint-admin">5ms</span>
+              </div>
+              <pre class="verified-data-box" id="data-endpoint-admin">// Loading live data...</pre>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- LIVE BACKEND AUDIT LOG -->
+    <section class="glass-panel" style="padding: 1.25rem 1.75rem;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+        <div style="font-size: 0.92rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem;">
+          <span>📋</span> Live Backend Audit Decision Log (Flask in-memory buffer)
+        </div>
+        <button class="suite-copy-btn" onclick="fetchRecentAuditLog()">Refresh Log</button>
+      </div>
+
+      <div style="background: rgba(0,0,0,0.4); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: 0.85rem 1rem; font-family: var(--font-mono); font-size: 0.78rem; color: #cbd5e1; line-height: 1.5; overflow-x: auto;" id="latest-audit-log-line">
+        Loading latest Flask server audit log event...
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="app-footer">
+    AuthLab &bull; Keycloak + PostgreSQL + Flask Resource API &bull; Lightweight Security X-Ray
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
