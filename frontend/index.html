@@ -1,14 +1,18 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FarmSight 360 — Keycloak Integrated Platform</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
+
 <body>
   <!-- =====================================================================
        TOP NAVIGATION BAR
@@ -23,18 +27,18 @@
     </div>
 
     <div class="topbar-actions">
+      <a href="authlab.html" class="btn btn-secondary" title="Open Multi-Level Access Showcase (authlab Realm)">
+        🔐 Access Level Showcase (authlab Realm) →
+      </a>
+
       <span id="kc-status-pill" class="status-pill">
         <span class="status-dot"></span>
         <span id="kc-status-text">Keycloak: Checking...</span>
       </span>
 
-      <a
-        href="http://localhost:8080/admin/master/console/#/farm360/users"
-        target="_blank"
-        rel="noopener"
+      <a href="http://localhost:8080/admin/master/console/#/farm360/users" target="_blank" rel="noopener"
         class="btn btn-outline-amber"
-        title="Admins manage users, roles, and password resets directly in the Keycloak Admin Console"
-      >
+        title="Admins manage users, roles, and password resets directly in the Keycloak Admin Console">
         🛡️ Keycloak Admin Console (:8080) ↗
       </a>
 
@@ -151,7 +155,8 @@
         <div class="info-badge">KEYCLOAK REALM: FARM360</div>
         <h2>FarmSight 360 — Agricultural Management Sample App</h2>
         <p>
-          A streamlined mock of <strong>FarmSight 360</strong> backed by PostgreSQL and authenticated through a dedicated Keycloak realm (<code>farm360</code>) and OIDC client (<code>farm360-web</code>).
+          A streamlined mock of <strong>FarmSight 360</strong> backed by PostgreSQL and authenticated through a
+          dedicated Keycloak realm (<code>farm360</code>) and OIDC client (<code>farm360-web</code>).
         </p>
 
         <div class="feature-list">
@@ -184,19 +189,17 @@
             <span>🛡️ Administrator Access (Keycloak Webpage)</span>
           </div>
           <p>
-            Administrators manage users, reset login passwords, assign roles (<code>farmer</code>, <code>service_provider</code>, <code>admin</code>), and disable accounts directly in the official <strong>Keycloak Admin Console</strong>:
+            Administrators manage users, reset login passwords, assign roles (<code>farmer</code>,
+            <code>service_provider</code>, <code>admin</code>), and disable accounts directly in the official
+            <strong>Keycloak Admin Console</strong>:
           </p>
           <div class="admin-creds-grid">
             <div><span>Admin URL:</span> <code>http://localhost:8080/admin</code></div>
             <div><span>Target Realm:</span> <code>farm360</code></div>
             <div><span>Master Admin:</span> <code>admin</code> / <code>Admin@2601</code></div>
           </div>
-          <a
-            href="http://localhost:8080/admin/master/console/#/farm360/users"
-            target="_blank"
-            rel="noopener"
-            class="btn btn-amber btn-block"
-          >
+          <a href="http://localhost:8080/admin/master/console/#/farm360/users" target="_blank" rel="noopener"
+            class="btn btn-amber btn-block">
             🛡️ Launch Keycloak Admin Webpage (farm360 Realm) ↗
           </a>
         </div>
@@ -263,7 +266,8 @@
 
       <!-- Quick Add Crop Bar -->
       <form class="inline-add-form" onsubmit="handleAddCrop(event)">
-        <input type="text" id="crop-farm" class="form-input" placeholder="Farm Estate Name (e.g. Green Valley)" required />
+        <input type="text" id="crop-farm" class="form-input" placeholder="Farm Estate Name (e.g. Green Valley)"
+          required />
         <input type="text" id="crop-name" class="form-input" placeholder="Crop Name (e.g. Cardamom)" required />
         <input type="text" id="crop-variety" class="form-input" placeholder="Variety (e.g. Malabar)" />
         <input type="number" step="0.1" id="crop-acres" class="form-input" placeholder="Acres (e.g. 5.5)" required />
@@ -302,9 +306,11 @@
 
       <form class="inline-add-form" onsubmit="handleAddWorker(event)">
         <input type="text" id="wrk-name" class="form-input" placeholder="Worker Full Name" required />
-        <input type="text" id="wrk-role" class="form-input" placeholder="Role (e.g. Harvester, Tractor Driver)" required />
+        <input type="text" id="wrk-role" class="form-input" placeholder="Role (e.g. Harvester, Tractor Driver)"
+          required />
         <input type="number" id="wrk-wage" class="form-input" placeholder="Daily Wage (₹)" value="550" required />
-        <input type="text" id="wrk-farm" class="form-input" placeholder="Assigned Estate" value="Green Valley Estate" required />
+        <input type="text" id="wrk-farm" class="form-input" placeholder="Assigned Estate" value="Green Valley Estate"
+          required />
         <button type="submit" class="btn btn-primary">+ Add Worker</button>
       </form>
 
@@ -396,8 +402,10 @@
           <option value="INCOME">📈 INCOME (Harvest Sale)</option>
           <option value="EXPENSE">📉 EXPENSE (Farm Cost)</option>
         </select>
-        <input type="text" id="fin-category" class="form-input" placeholder="Category (e.g. Harvest Sale, Fertilizer)" required />
-        <input type="text" id="fin-desc" class="form-input" placeholder="Description (e.g. Sold 10 Quintals Paddy)" required />
+        <input type="text" id="fin-category" class="form-input" placeholder="Category (e.g. Harvest Sale, Fertilizer)"
+          required />
+        <input type="text" id="fin-desc" class="form-input" placeholder="Description (e.g. Sold 10 Quintals Paddy)"
+          required />
         <input type="number" id="fin-amount" class="form-input" placeholder="Amount (₹)" required />
         <button type="submit" class="btn btn-primary">+ Record Entry</button>
       </form>
@@ -432,7 +440,9 @@
       <div class="modal-body">
         <p class="modal-note">
           Issued by <code>http://localhost:8080/realms/farm360</code> for OIDC client <code>farm360-web</code>.
-          If an admin modifies your roles or groups in the <a href="http://localhost:8080/admin/master/console/#/farm360/users" target="_blank" rel="noopener">Keycloak Admin Console</a>, sign out and sign back in to mint an updated token.
+          If an admin modifies your roles or groups in the <a
+            href="http://localhost:8080/admin/master/console/#/farm360/users" target="_blank" rel="noopener">Keycloak
+            Admin Console</a>, sign out and sign back in to mint an updated token.
         </p>
         <label class="mono-label">Decoded JWT Claims Payload</label>
         <pre id="jwt-decoded-pre" class="code-pre"></pre>
@@ -442,4 +452,5 @@
 
   <script src="app.js"></script>
 </body>
+
 </html>

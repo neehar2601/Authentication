@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AuthLab — Role-Based Content Showcase (authlab Realm)</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .tier-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 1rem;
+      background: linear-gradient(135deg, rgba(17, 30, 25, 0.95), rgba(23, 41, 34, 0.9));
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1.5rem;
+    }
+    .tier-pills {
+      display: flex;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+    .tier-pill {
+      padding: 0.4rem 0.85rem;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .tier-unlocked {
+      background: rgba(16, 185, 129, 0.18);
+      border: 1px solid rgba(16, 185, 129, 0.45);
+      color: #6ee7b7;
+    }
+    .tier-locked {
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+      opacity: 0.8;
+    }
+    .tier-section {
+      margin-bottom: 2rem;
+      border-radius: 14px;
+      padding: 1.35rem;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+    }
+    .tier-section.tier-dev {
+      border-color: rgba(59, 130, 246, 0.35);
+    }
+    .tier-section.tier-adm {
+      border-color: rgba(245, 158, 11, 0.45);
+    }
+    .content-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    .content-card {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      padding: 1.15rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 0.85rem;
+    }
+    .content-card h4 {
+      font-size: 1rem;
+      color: #fff;
+      margin: 0.25rem 0;
+    }
+    .config-box {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--border-subtle);
+      padding: 0.55rem 0.75rem;
+      border-radius: 8px;
+      color: #a7f3d0;
+      word-break: break-all;
+    }
+    .locked-placeholder {
+      padding: 1.1rem 1.25rem;
+      border-radius: 12px;
+      background: rgba(239, 68, 68, 0.06);
+      border: 1px dashed rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+      font-size: 0.85rem;
+      margin-bottom: 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+  </style>
+</head>
+<body>
+  <!-- =====================================================================
+       TOP NAVIGATION BAR
+       ===================================================================== -->
+  <header class="topbar">
+    <div class="topbar-brand">
+      <div class="brand-logo">🔐</div>
+      <div>
+        <div class="brand-title">AuthLab — Access Level Showcase</div>
+        <div class="brand-subtitle">Keycloak Identity Realm: <code>authlab</code> (Reader / Developer / Admin)</div>
+      </div>
+    </div>
+
+    <div class="topbar-actions">
+      <a href="index.html" class="btn btn-ghost" title="Switch to FarmSight 360 App (farm360 Realm)">
+        🌾 FarmSight 360 Page
+      </a>
+
+      <a
+        href="http://localhost:8080/admin/master/console/#/authlab/users"
+        target="_blank"
+        rel="noopener"
+        class="btn btn-outline-amber"
+        title="Manage users and roles in the authlab Keycloak realm"
+      >
+        🛡️ Keycloak Admin (authlab) ↗
+      </a>
+
+      <div id="nav-user-controls" class="nav-user-controls hidden">
+        <button type="button" class="btn btn-ghost" onclick="toggleJwtModal()">
+          🔑 View JWT
+        </button>
+        <div class="user-chip">
+          <span id="nav-user-icon">📖</span>
+          <div>
+            <div id="nav-user-name" class="user-chip-name">alice</div>
+            <div id="nav-user-role" class="user-chip-role">Reader</div>
+          </div>
+        </div>
+        <button type="button" class="btn btn-danger-soft" onclick="logoutUser()">
+          Sign Out
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- =====================================================================
+       VIEW 1: SAME LOGIN / REGISTER GATE (USING AUTHLAB REALM)
+       ===================================================================== -->
+  <main id="auth-view" class="auth-container">
+    <div class="auth-grid">
+      <!-- Left Column: Sign In / Register Form -->
+      <div class="auth-card">
+        <div class="auth-tabs">
+          <button type="button" id="tab-btn-login" class="auth-tab active" onclick="switchAuthTab('login')">
+            🔐 Sign In
+          </button>
+          <button type="button" id="tab-btn-register" class="auth-tab" onclick="switchAuthTab('register')">
+            ✨ Register New User
+          </button>
+        </div>
+
+        <div id="auth-alert" class="alert-box hidden"></div>
+
+        <!-- SIGN IN FORM -->
+        <form id="login-form" onsubmit="handleLoginSubmit(event)">
+          <div class="form-group">
+            <label>Username or Email</label>
+            <input type="text" id="login-username" class="form-input" placeholder="alice, dev, or bob" required />
+          </div>
+          <div class="form-group">
+            <label>Password</label>
+            <input type="password" id="login-password" class="form-input" placeholder="Enter password" required />
+          </div>
+          <button type="submit" id="login-submit-btn" class="btn btn-primary btn-block">
+            Sign In with Keycloak (Realm: authlab)
+          </button>
+
+          <div class="divider"><span>OR USE KEYCLOAK HOSTED LOGIN</span></div>
+
+          <button type="button" class="btn btn-secondary btn-block" onclick="loginWithKeycloakRedirect()">
+            🌐 Redirect to Keycloak Login Page (:8080)
+          </button>
+
+          <div class="quick-demo-box">
+            <div class="quick-demo-title">⚡ Pre-Created Users in <code>authlab</code> Realm (Click to Sign In):</div>
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.45rem;">
+              <button type="button" class="demo-pill" onclick="quickLogin('alice', 'alice123')">
+                📖 <strong>alice</strong> <span>(Reader)</span>
+              </button>
+              <button type="button" class="demo-pill" onclick="quickLogin('dev', 'dev123')">
+                💻 <strong>dev</strong> <span>(Developer)</span>
+              </button>
+              <button type="button" class="demo-pill" onclick="quickLogin('bob', 'bob123')">
+                🛡️ <strong>bob</strong> <span>(Admin)</span>
+              </button>
+            </div>
+          </div>
+        </form>
+
+        <!-- REGISTER FORM -->
+        <form id="register-form" class="hidden" onsubmit="handleRegisterSubmit(event)">
+          <div class="form-row-2">
+            <div class="form-group">
+              <label>Username *</label>
+              <input type="text" id="reg-username" class="form-input" placeholder="e.g. rahul" required />
+            </div>
+            <div class="form-group">
+              <label>Access Level (Role) *</label>
+              <select id="reg-role" class="form-input">
+                <option value="viewer">📖 Reader (viewer)</option>
+                <option value="developer">💻 Developer (developer)</option>
+                <option value="admin">🛡️ Admin (admin)</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row-2">
+            <div class="form-group">
+              <label>First Name</label>
+              <input type="text" id="reg-firstname" class="form-input" placeholder="Rahul" />
+            </div>
+            <div class="form-group">
+              <label>Last Name</label>
+              <input type="text" id="reg-lastname" class="form-input" placeholder="Sharma" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Email Address</label>
+            <input type="email" id="reg-email" class="form-input" placeholder="rahul@authlab.local" />
+          </div>
+          <div class="form-group">
+            <label>Password *</label>
+            <input type="password" id="reg-password" class="form-input" placeholder="Minimum 4 characters" required />
+          </div>
+          <button type="submit" id="reg-submit-btn" class="btn btn-primary btn-block">
+            Register in Keycloak (authlab) &amp; Sign In
+          </button>
+        </form>
+      </div>
+
+      <!-- Right Column: Explanation of the 3 Access Tiers -->
+      <div class="auth-info-card">
+        <div class="info-badge">KEYCLOAK REALM: AUTHLAB</div>
+        <h2>Multi-Tier Content Access Showcase</h2>
+        <p>
+          All users sign in through the <strong>same login page</strong> using the <code>authlab</code> Keycloak realm, but the page dynamically unlocks content and editing capabilities based on their Keycloak role:
+        </p>
+
+        <div class="feature-list">
+          <div class="feature-item">
+            <span class="feature-icon">📖</span>
+            <div>
+              <strong>Reader Access (<code>viewer</code> — e.g. <code>alice</code>)</strong>
+              <p>Sees <strong>only Reader Content</strong> (Documentation, Status Bulletins, Knowledge Base) in strict Read-Only mode. Developer and Admin sections are locked.</p>
+            </div>
+          </div>
+          <div class="feature-item">
+            <span class="feature-icon">💻</span>
+            <div>
+              <strong>Developer Access (<code>developer</code> — e.g. <code>dev</code>)</strong>
+              <p>Sees both <strong>Reader Content</strong> AND <strong>Developer Content</strong> (Feature Flags, CI/CD Configs, Webhooks) and can <strong>edit &amp; create</strong> items in both tiers.</p>
+            </div>
+          </div>
+          <div class="feature-item">
+            <span class="feature-icon">🛡️</span>
+            <div>
+              <strong>Admin Access (<code>admin</code> — e.g. <code>bob</code>)</strong>
+              <p>Unlocks <strong>ALL 3 Tiers</strong> (Reader + Developer + Admin Security Vault &amp; IAM Governance) with full Create, Edit, and Delete privileges.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="admin-portal-box">
+          <div class="admin-portal-header">
+            <span>🛡️ Modify User Roles Live in Keycloak Webpage</span>
+          </div>
+          <p>
+            Open the Keycloak Admin Console for the <code>authlab</code> realm to change any user's role/group or reset their password:
+          </p>
+          <a
+            href="http://localhost:8080/admin/master/console/#/authlab/users"
+            target="_blank"
+            rel="noopener"
+            class="btn btn-amber btn-block"
+          >
+            🛡️ Open Keycloak Admin Console (authlab Realm) ↗
+          </a>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- =====================================================================
+       VIEW 2: ROLE-BASED CONTENT PORTAL (AUTHENTICATED)
+       ===================================================================== -->
+  <main id="portal-view" class="dashboard-container hidden">
+    <!-- Active Access Level Banner + Instant Role Switcher for Demo -->
+    <div class="tier-banner">
+      <div>
+        <div style="font-size: 0.76rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em;">
+          Signed In via Keycloak (<code>authlab</code> Realm)
+        </div>
+        <h2 id="banner-role-title" style="font-size: 1.35rem; color: #fff; margin: 0.15rem 0;">
+          📖 Reader Access Level
+        </h2>
+        <div id="banner-role-desc" style="font-size: 0.84rem; color: var(--text-secondary);">
+          You have Read-Only access to Reader Content.
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.55rem;">
+        <div id="tier-status-pills" class="tier-pills"></div>
+        <div style="display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">
+          <span style="font-size: 0.74rem; color: var(--text-dim);">Quick Switch User:</span>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="quickLogin('alice', 'alice123')">
+            📖 alice (Reader)
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="quickLogin('dev', 'dev123')">
+            💻 dev (Developer)
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="quickLogin('bob', 'bob123')">
+            🛡️ bob (Admin)
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="portal-toast" class="toast-banner hidden"></div>
+
+    <!-- CREATE CONTENT FORM (Shown ONLY to Developer and Admin) -->
+    <section id="create-content-box" class="tier-section hidden" style="padding: 1rem 1.25rem; margin-bottom: 1.5rem;">
+      <div style="font-weight: 700; font-size: 0.9rem; color: #fff; margin-bottom: 0.65rem;">
+        ➕ Add New Content Item (Unlocked for Developer &amp; Admin)
+      </div>
+      <form class="inline-add-form" style="margin-bottom: 0;" onsubmit="handleCreateContent(event)">
+        <select id="new-tier" class="form-input">
+          <option value="reader">📖 Tier 1: Reader Content</option>
+          <option value="developer" selected>💻 Tier 2: Developer Content</option>
+          <option value="admin" id="opt-tier-admin">🛡️ Tier 3: Admin Content</option>
+        </select>
+        <input type="text" id="new-category" class="form-input" placeholder="Category (e.g. Runtime Config)" required />
+        <input type="text" id="new-title" class="form-input" placeholder="Title" required />
+        <input type="text" id="new-body" class="form-input" placeholder="Description / Content Body" required />
+        <input type="text" id="new-config" class="form-input" placeholder="Config / Metadata (e.g. FLAG=true)" />
+        <button type="submit" class="btn btn-primary">+ Publish Content</button>
+      </form>
+    </section>
+
+    <!-- ===================================================================
+         TIER 1: READER CONTENT (Visible to Reader, Developer, Admin)
+         =================================================================== -->
+    <section id="section-reader" class="tier-section">
+      <div class="section-header">
+        <div>
+          <h3>📖 Tier 1: Reader Content</h3>
+          <p id="sub-reader">Accessible to Reader (<code>viewer</code>), Developer (<code>developer</code>), and Admin (<code>admin</code>).</p>
+        </div>
+        <span class="badge badge-green">🔓 Unlocked for All Authenticated Users</span>
+      </div>
+      <div id="grid-reader" class="content-grid"></div>
+    </section>
+
+    <!-- ===================================================================
+         TIER 2: DEVELOPER CONTENT (Visible & Editable by Developer & Admin)
+         =================================================================== -->
+    <section id="section-developer" class="tier-section tier-dev hidden">
+      <div class="section-header">
+        <div>
+          <h3>💻 Tier 2: Developer Content &amp; Runtime Configurations</h3>
+          <p>Accessible &amp; editable only by <strong>Developer (<code>developer</code>)</strong> and <strong>Admin (<code>admin</code>)</strong>.</p>
+        </div>
+        <span class="badge badge-blue">🔓 Developer &amp; Admin Edit Access</span>
+      </div>
+      <div id="grid-developer" class="content-grid"></div>
+    </section>
+
+    <div id="locked-developer" class="locked-placeholder hidden">
+      <div>
+        <strong>🔒 Tier 2: Developer Content is Locked</strong> — Your current account (<code id="locked-dev-user">alice</code>) has <strong>Reader (<code>viewer</code>)</strong> access only.
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="quickLogin('dev', 'dev123')">
+        Switch to 💻 dev (Developer) to Unlock →
+      </button>
+    </div>
+
+    <!-- ===================================================================
+         TIER 3: ADMIN CONTENT (Visible, Editable & Deletable by Admin Only)
+         =================================================================== -->
+    <section id="section-admin" class="tier-section tier-adm hidden">
+      <div class="section-header">
+        <div>
+          <h3>🛡️ Tier 3: Admin Security &amp; Governance Content</h3>
+          <p>Restricted strictly to <strong>Admin (<code>admin</code>)</strong> accounts. Full Create, Edit, and Delete control.</p>
+        </div>
+        <span class="badge badge-amber">🔓 Admin Full Control</span>
+      </div>
+      <div id="grid-admin" class="content-grid"></div>
+    </section>
+
+    <div id="locked-admin" class="locked-placeholder hidden">
+      <div>
+        <strong>🔒 Tier 3: Admin Content is Locked</strong> — Restricted to <strong>Admin (<code>admin</code>)</strong> accounts. Readers and Developers cannot view or modify Admin content.
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="quickLogin('bob', 'bob123')">
+        Switch to 🛡️ bob (Admin) to Unlock →
+      </button>
+    </div>
+  </main>
+
+  <!-- =====================================================================
+       MODAL: KEYCLOAK JWT INSPECTOR
+       ===================================================================== -->
+  <div id="jwt-modal" class="modal-backdrop hidden" onclick="if(event.target===this) toggleJwtModal()">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>🔑 Active Keycloak Access Token (Realm: <code>authlab</code>)</h3>
+        <button type="button" class="btn btn-ghost" onclick="toggleJwtModal()">✕ Close</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-note">
+          Issued by <code>http://localhost:8080/realms/authlab</code>. Notice how <code>realm_access.roles</code> determines whether you get Reader (<code>viewer</code>), Developer (<code>developer</code>), or Admin (<code>admin</code>) content.
+        </p>
+        <label class="mono-label">Decoded JWT Claims Payload</label>
+        <pre id="jwt-decoded-pre" class="code-pre"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script src="authlab.js"></script>
+</body>
+</html>
+

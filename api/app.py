@@ -271,10 +271,116 @@ def _init_db():
                     );
                     """
                 )
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS authlab_content (
+                        id SERIAL PRIMARY KEY,
+                        tier VARCHAR(32) NOT NULL,
+                        title VARCHAR(160) NOT NULL,
+                        category VARCHAR(80) NOT NULL,
+                        content_body TEXT NOT NULL,
+                        config_note TEXT DEFAULT '',
+                        updated_by VARCHAR(80) DEFAULT 'system',
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    );
+                    """
+                )
                 _seed_defaults(cur)
+                _seed_authlab_content(cur)
             conn.commit()
     except Exception as exc:
         app.logger.warning(f"PostgreSQL init warning: {exc}")
+
+
+def _seed_authlab_content(cur):
+    cur.execute("SELECT COUNT(*) FROM authlab_content;")
+    if cur.fetchone()[0] > 0:
+        return
+    items = [
+        # Tier 1: Reader Content (Visible to Reader, Developer, Admin | Editable by Developer & Admin)
+        (
+            "reader",
+            "Platform Architecture & Public API Guide",
+            "Documentation",
+            "Overview of the OAuth2 / OIDC authentication flow with Keycloak RS256 JWT validation and PostgreSQL role-based data scoping.",
+            "DOC_VERSION=v2.4 | PUBLIC_ACCESS=enabled",
+            "system",
+        ),
+        (
+            "reader",
+            "Q4 Service Status & Uptime Bulletin",
+            "System Status",
+            "All regional clusters (US-East, EU-West, AP-South) are operating normally at 99.98% uptime. Scheduled maintenance window: Sunday 02:00 UTC.",
+            "SLA_TARGET=99.95% | STATUS=HEALTHY",
+            "alice",
+        ),
+        (
+            "reader",
+            "Security & Token Verification Handbook",
+            "Knowledge Base",
+            "Every API request verifies the Keycloak JWT signature via JWKS and extracts realm_access.roles to determine Reader, Developer, or Admin access.",
+            "JWKS_CACHE_TTL=300s | ALGO=RS256",
+            "system",
+        ),
+        # Tier 2: Developer Content (Visible & Editable ONLY by Developer and Admin)
+        (
+            "developer",
+            "Staging & Microservice Feature Flags",
+            "Runtime Config",
+            "Developer-managed feature toggles for staging and canary services. Modify these flags to test new API pipelines before production rollout.",
+            "ENABLE_ASYNC_WEBHOOKS=true | RATE_LIMIT_RPS=2500 | DEBUG_TRACE=false",
+            "dev",
+        ),
+        (
+            "developer",
+            "CI/CD Canary Deployment & Build Spec",
+            "DevOps Pipeline",
+            "Kubernetes rollout specification for the API service. Developers can tune canary traffic weights and replica autoscaling thresholds here.",
+            "CANARY_WEIGHT=20% | MIN_REPLICAS=3 | MAX_REPLICAS=12 | K8S_NS=authlab-staging",
+            "dev",
+        ),
+        (
+            "developer",
+            "Internal Webhook & Integration Endpoints",
+            "Developer Portal",
+            "Internal event bus endpoints and retry policy configuration used by backend workers for asynchronous event delivery.",
+            "RETRY_BACKOFF=exponential | TIMEOUT_MS=4500 | DLQ_TOPIC=events.dlq.v1",
+            "dev",
+        ),
+        # Tier 3: Admin Content (Visible, Editable, & Deletable ONLY by Admin)
+        (
+            "admin",
+            "Production Vault & Master DB Rotation Policy",
+            "Security Governance",
+            "Restricted L3 Admin control panel for master PostgreSQL credential rotation, mTLS root certificate authorities, and hardware security module keys.",
+            "VAULT_PATH=secret/prod/db-master | ROTATION_DAYS=30 | STRICT_MTLS=enforced",
+            "bob",
+        ),
+        (
+            "admin",
+            "Zero-Trust IAM & Privileged Access Rules",
+            "IAM Policy",
+            "Global Keycloak realm governance rules: enforces token lifespans, admin session timeouts, and mandatory audit logging for role promotions.",
+            "ADMIN_TOKEN_TTL=900s | AUDIT_RETENTION=365d | SOC2_ENFORCEMENT=active",
+            "bob",
+        ),
+        (
+            "admin",
+            "Disaster Recovery & Multi-Region Failover Control",
+            "Infrastructure Control",
+            "Emergency cross-region database failover controls and production cluster kill-switch reserved strictly for Platform Administrators.",
+            "PRIMARY_REGION=us-east-1 | FAILOVER_REGION=ap-south-1 | RPO_MINUTES=5",
+            "bob",
+        ),
+    ]
+    for item in items:
+        cur.execute(
+            """
+            INSERT INTO authlab_content (tier, title, category, content_body, config_note, updated_by)
+            VALUES (%s, %s, %s, %s, %s, %s);
+            """,
+            item,
+        )
 
 
 # ============================================================================
@@ -1054,3 +1160,534 @@ def create_finance_entry():
         conn.commit()
 
     return jsonify(status="created", id=tx_id, message=f"Recorded {tx_type} of ₹{amount_inr:,}."), 201
+
+
+# ============================================================================
+# AUTHLAB REALM: MULTI-LEVEL ACCESS SHOWCASE (READER / DEVELOPER / ADMIN)
+# ============================================================================
+
+AUTHLAB_REALM = "authlab"
+AUTHLAB_ISSUER = f"http://localhost:8080/realms/{AUTHLAB_REALM}"
+AUTHLAB_JWKS_URL = f"{KEYCLOAK_INTERNAL_URL}/realms/{AUTHLAB_REALM}/protocol/openid-connect/certs"
+_jwks_authlab_client = PyJWKClient(AUTHLAB_JWKS_URL, cache_keys=True)
+_authlab_bootstrapped = False
+
+AUTHLAB_ROLES = {"viewer", "developer", "admin"}
+AUTHLAB_ROLE_TO_GROUP = {
+    "viewer": "Viewers",
+    "developer": "Developers",
+    "admin": "Admin",
+}
+
+
+def _sync_authlab_role_and_group(user_id, role_name, token):
+    """Assign direct realm role AND matching group in the `authlab` realm."""
+    if role_name not in AUTHLAB_ROLES:
+        role_name = "viewer"
+
+    # Remove old roles from direct realm mappings
+    _, _, current_roles = _kc_request(
+        f"/admin/realms/{AUTHLAB_REALM}/users/{urllib.parse.quote(user_id)}/role-mappings/realm",
+        token=token,
+    )
+    to_remove = [
+        {"id": r["id"], "name": r["name"]}
+        for r in (current_roles or [])
+        if r.get("name") in AUTHLAB_ROLES and r.get("name") != role_name
+    ]
+    if to_remove:
+        _kc_request(
+            f"/admin/realms/{AUTHLAB_REALM}/users/{urllib.parse.quote(user_id)}/role-mappings/realm",
+            method="DELETE",
+            payload=to_remove,
+            token=token,
+        )
+
+    # Add new direct realm role
+    _, _, role_rep = _kc_request(
+        f"/admin/realms/{AUTHLAB_REALM}/roles/{urllib.parse.quote(role_name)}",
+        token=token,
+    )
+    _kc_request(
+        f"/admin/realms/{AUTHLAB_REALM}/users/{urllib.parse.quote(user_id)}/role-mappings/realm",
+        method="POST",
+        payload=[{"id": role_rep["id"], "name": role_rep["name"]}],
+        token=token,
+    )
+
+    # Sync group membership
+    target_group = AUTHLAB_ROLE_TO_GROUP.get(role_name)
+    _, _, all_groups = _kc_request(f"/admin/realms/{AUTHLAB_REALM}/groups", token=token)
+    _, _, user_groups = _kc_request(
+        f"/admin/realms/{AUTHLAB_REALM}/users/{urllib.parse.quote(user_id)}/groups",
+        token=token,
+    )
+    managed_group_names = set(AUTHLAB_ROLE_TO_GROUP.values())
+    for ug in user_groups or []:
+        if ug.get("name") in managed_group_names and ug.get("name") != target_group:
+            _kc_request(
+                f"/admin/realms/{AUTHLAB_REALM}/users/{urllib.parse.quote(user_id)}/groups/{ug['id']}",
+                method="DELETE",
+                token=token,
+            )
+    for g_obj in all_groups or []:
+        if g_obj.get("name") == target_group:
+            _kc_request(
+                f"/admin/realms/{AUTHLAB_REALM}/users/{urllib.parse.quote(user_id)}/groups/{g_obj['id']}",
+                method="PUT",
+                token=token,
+            )
+
+
+def _ensure_authlab_realm():
+    """Ensure the `authlab` realm, client `authlab-frontend`, roles (viewer, developer, admin), groups, and default users exist."""
+    global _authlab_bootstrapped
+    if _authlab_bootstrapped:
+        return
+    with _bootstrap_lock:
+        if _authlab_bootstrapped:
+            return
+        try:
+            token = _get_kc_admin_token()
+            realm_exists = False
+            try:
+                _kc_request(f"/admin/realms/{AUTHLAB_REALM}", token=token)
+                realm_exists = True
+            except urllib.error.HTTPError as e:
+                if e.code != 404:
+                    raise
+
+            if not realm_exists:
+                _kc_request(
+                    "/admin/realms",
+                    method="POST",
+                    payload={
+                        "realm": AUTHLAB_REALM,
+                        "enabled": True,
+                        "displayName": "AuthLab RBAC Showcase",
+                        "registrationAllowed": True,
+                        "resetPasswordAllowed": True,
+                        "loginWithEmailAllowed": True,
+                    },
+                    token=token,
+                )
+            else:
+                # Ensure registrationAllowed is enabled on authlab realm too
+                _kc_request(
+                    f"/admin/realms/{AUTHLAB_REALM}",
+                    method="PUT",
+                    payload={
+                        "realm": AUTHLAB_REALM,
+                        "enabled": True,
+                        "registrationAllowed": True,
+                        "resetPasswordAllowed": True,
+                    },
+                    token=token,
+                )
+
+            # Ensure roles viewer, developer, admin exist
+            for r_name in ("viewer", "developer", "admin"):
+                try:
+                    _kc_request(f"/admin/realms/{AUTHLAB_REALM}/roles/{r_name}", token=token)
+                except urllib.error.HTTPError as e:
+                    if e.code == 404:
+                        _kc_request(
+                            f"/admin/realms/{AUTHLAB_REALM}/roles",
+                            method="POST",
+                            payload={"name": r_name},
+                            token=token,
+                        )
+
+            # Ensure groups Viewers, Developers, Admin exist and map to their roles
+            _, _, existing_groups = _kc_request(f"/admin/realms/{AUTHLAB_REALM}/groups", token=token)
+            g_map = {g["name"]: g["id"] for g in (existing_groups or [])}
+            for r_name, g_name in AUTHLAB_ROLE_TO_GROUP.items():
+                if g_name not in g_map:
+                    _, headers, _ = _kc_request(
+                        f"/admin/realms/{AUTHLAB_REALM}/groups",
+                        method="POST",
+                        payload={"name": g_name},
+                        token=token,
+                    )
+                    loc = headers.get("Location") or ""
+                    if loc:
+                        g_map[g_name] = loc.rstrip("/").split("/")[-1]
+                g_id = g_map.get(g_name)
+                if g_id:
+                    _, _, r_rep = _kc_request(
+                        f"/admin/realms/{AUTHLAB_REALM}/roles/{r_name}", token=token
+                    )
+                    _kc_request(
+                        f"/admin/realms/{AUTHLAB_REALM}/groups/{g_id}/role-mappings/realm",
+                        method="POST",
+                        payload=[{"id": r_rep["id"], "name": r_rep["name"]}],
+                        token=token,
+                    )
+
+            # Ensure client authlab-frontend allows redirect URIs for authlab.html
+            _, _, clients = _kc_request(
+                f"/admin/realms/{AUTHLAB_REALM}/clients?clientId=authlab-frontend", token=token
+            )
+            if not clients:
+                _kc_request(
+                    f"/admin/realms/{AUTHLAB_REALM}/clients",
+                    method="POST",
+                    payload={
+                        "clientId": "authlab-frontend",
+                        "name": "AuthLab Access Showcase",
+                        "enabled": True,
+                        "protocol": "openid-connect",
+                        "publicClient": True,
+                        "standardFlowEnabled": True,
+                        "directAccessGrantsEnabled": True,
+                        "redirectUris": ["http://localhost:3000/*", "http://127.0.0.1:3000/*"],
+                        "webOrigins": ["*"],
+                    },
+                    token=token,
+                )
+            else:
+                cid = clients[0]["id"]
+                c_rep = clients[0]
+                c_rep["standardFlowEnabled"] = True
+                c_rep["directAccessGrantsEnabled"] = True
+                c_rep["redirectUris"] = ["http://localhost:3000/*", "http://127.0.0.1:3000/*"]
+                c_rep["webOrigins"] = ["*"]
+                _kc_request(
+                    f"/admin/realms/{AUTHLAB_REALM}/clients/{cid}",
+                    method="PUT",
+                    payload=c_rep,
+                    token=token,
+                )
+
+            # Ensure default users alice (Reader/viewer), dev (Developer), bob (Admin) exist
+            seed_users = [
+                ("alice", "alice123", "Alice", "Reader", "alice@authlab.local", "viewer"),
+                ("dev", "dev123", "Dev", "Engineer", "dev@authlab.local", "developer"),
+                ("bob", "bob123", "Bob", "Admin", "bob@authlab.local", "admin"),
+            ]
+            for uname, pwd, fname, lname, email, role in seed_users:
+                _, _, found = _kc_request(
+                    f"/admin/realms/{AUTHLAB_REALM}/users?username={uname}&exact=true",
+                    token=token,
+                )
+                if not found:
+                    _, headers, _ = _kc_request(
+                        f"/admin/realms/{AUTHLAB_REALM}/users",
+                        method="POST",
+                        payload={
+                            "username": uname,
+                            "firstName": fname,
+                            "lastName": lname,
+                            "email": email,
+                            "emailVerified": True,
+                            "enabled": True,
+                            "requiredActions": [],
+                        },
+                        token=token,
+                    )
+                    loc = headers.get("Location") or ""
+                    uid = loc.rstrip("/").split("/")[-1] if loc else None
+                    if uid:
+                        _kc_request(
+                            f"/admin/realms/{AUTHLAB_REALM}/users/{uid}/reset-password",
+                            method="PUT",
+                            payload={"type": "password", "value": pwd, "temporary": False},
+                            token=token,
+                        )
+                        _sync_authlab_role_and_group(uid, role, token)
+
+            _authlab_bootstrapped = True
+        except Exception as exc:
+            app.logger.warning(f"AuthLab realm bootstrap warning: {exc}")
+
+
+def _authlab_primary_role(roles):
+    if "admin" in roles:
+        return "admin"
+    if "developer" in roles:
+        return "developer"
+    return "viewer"
+
+
+def require_authlab_auth(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        _ensure_authlab_realm()
+        token = _extract_bearer_token()
+        if not token:
+            return jsonify(error="missing_token", detail="Bearer token required"), 401
+        try:
+            signing_key = _jwks_authlab_client.get_signing_key_from_jwt(token)
+            claims = jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=["RS256"],
+                issuer=AUTHLAB_ISSUER,
+                options={"verify_aud": False},
+            )
+        except jwt.ExpiredSignatureError:
+            return jsonify(error="token_expired", detail="Keycloak access token has expired"), 401
+        except jwt.InvalidTokenError as exc:
+            return jsonify(error="invalid_token", detail=str(exc)), 401
+
+        realm_roles = set(claims.get("realm_access", {}).get("roles", []) or [])
+        res_roles = set(
+            claims.get("resource_access", {}).get("authlab-api", {}).get("roles", []) or []
+        )
+        g.claims = claims
+        g.roles = realm_roles | res_roles
+        g.username = claims.get("preferred_username", "unknown")
+        g.primary_role = _authlab_primary_role(g.roles)
+        return fn(*args, **kwargs)
+
+    return wrapper
+
+
+@app.post("/api/authlab/register")
+def authlab_register_user():
+    """Register a user in the `authlab` Keycloak realm with Reader (viewer), Developer, or Admin access."""
+    _ensure_authlab_realm()
+    body = request.get_json(silent=True) or {}
+    username = (body.get("username") or "").strip().lower()
+    email = (body.get("email") or "").strip().lower()
+    first_name = (body.get("firstName") or "").strip()
+    last_name = (body.get("lastName") or "").strip()
+    password = body.get("password") or ""
+    requested_role = (body.get("role") or "viewer").strip().lower()
+
+    if not username or len(username) < 3:
+        return jsonify(error="invalid_input", detail="Username must be at least 3 characters."), 400
+    if not password or len(password) < 4:
+        return jsonify(error="invalid_input", detail="Password must be at least 4 characters."), 400
+    if requested_role not in AUTHLAB_ROLES:
+        requested_role = "viewer"
+    if not email:
+        email = f"{username}@authlab.local"
+    if not first_name:
+        first_name = username.capitalize()
+    if not last_name:
+        last_name = {"viewer": "Reader", "developer": "Developer", "admin": "Admin"}[requested_role]
+
+    try:
+        token = _get_kc_admin_token()
+        try:
+            _, headers, _ = _kc_request(
+                f"/admin/realms/{AUTHLAB_REALM}/users",
+                method="POST",
+                payload={
+                    "username": username,
+                    "email": email,
+                    "firstName": first_name,
+                    "lastName": last_name,
+                    "enabled": True,
+                    "emailVerified": True,
+                    "requiredActions": [],
+                },
+                token=token,
+            )
+        except urllib.error.HTTPError as http_err:
+            if http_err.code == 409:
+                return jsonify(
+                    error="user_exists",
+                    detail=f"User '{username}' or email '{email}' already exists in realm '{AUTHLAB_REALM}'.",
+                ), 409
+            raise
+
+        location = headers.get("Location") or ""
+        user_id = location.rstrip("/").split("/")[-1] if location else None
+        if not user_id:
+            _, _, users = _kc_request(
+                f"/admin/realms/{AUTHLAB_REALM}/users?username={urllib.parse.quote(username)}&exact=true",
+                token=token,
+            )
+            user_id = users[0]["id"]
+
+        _kc_request(
+            f"/admin/realms/{AUTHLAB_REALM}/users/{urllib.parse.quote(user_id)}/reset-password",
+            method="PUT",
+            payload={"type": "password", "value": password, "temporary": False},
+            token=token,
+        )
+        _sync_authlab_role_and_group(user_id, requested_role, token)
+
+        return jsonify(
+            status="created",
+            username=username,
+            role=requested_role,
+            realm=AUTHLAB_REALM,
+            message=f"User '{username}' registered in '{AUTHLAB_REALM}' realm with '{requested_role}' access.",
+        ), 201
+    except Exception as exc:
+        return jsonify(error="registration_failed", detail=str(exc)), 500
+
+
+@app.get("/api/authlab/content")
+@require_authlab_auth
+def get_authlab_content():
+    """Return content filtered strictly by the user's Keycloak access level in `authlab` realm:
+    - viewer (Reader): only 'reader' content (Read-Only)
+    - developer: 'reader' + 'developer' content (Can Edit & Create reader/developer content)
+    - admin: 'reader' + 'developer' + 'admin' content (Full Access: Create, Edit, Delete all content)
+    """
+    role = g.primary_role
+    if role == "admin":
+        allowed_tiers = ["reader", "developer", "admin"]
+    elif role == "developer":
+        allowed_tiers = ["reader", "developer"]
+    else:
+        allowed_tiers = ["reader"]
+
+    with _get_db_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT * FROM authlab_content
+                WHERE tier = ANY(%s)
+                ORDER BY id ASC;
+                """,
+                (allowed_tiers,),
+            )
+            rows = []
+            for r in cur.fetchall():
+                d = dict(r)
+                if isinstance(d.get("updated_at"), datetime.datetime):
+                    d["updated_at"] = d["updated_at"].strftime("%Y-%m-%d %H:%M")
+                rows.append(d)
+
+    role_label = {
+        "viewer": "Reader (L1 Read-Only)",
+        "developer": "Developer (L2 Read + Edit)",
+        "admin": "Admin (L3 Full Access)",
+    }.get(role, "Reader")
+
+    return jsonify(
+        user={
+            "username": g.username,
+            "name": g.claims.get("name") or g.username,
+            "email": g.claims.get("email", ""),
+            "primary_role": role,
+            "role_label": role_label,
+            "roles": sorted(list(g.roles)),
+            "sub": g.claims.get("sub"),
+            "realm": AUTHLAB_REALM,
+        },
+        permissions={
+            "unlocked_tiers": allowed_tiers,
+            "can_view_reader": True,
+            "can_view_developer": role in ("developer", "admin"),
+            "can_view_admin": role == "admin",
+            "can_edit": role in ("developer", "admin"),
+            "can_delete": role == "admin",
+        },
+        items=rows,
+    )
+
+
+@app.post("/api/authlab/content")
+@require_authlab_auth
+def create_authlab_content():
+    role = g.primary_role
+    if role not in ("developer", "admin"):
+        return jsonify(
+            error="forbidden",
+            detail="Reader ('viewer') accounts have read-only access and cannot create content.",
+        ), 403
+
+    body = request.get_json(silent=True) or {}
+    tier = (body.get("tier") or "developer").strip().lower()
+    if tier not in ("reader", "developer", "admin"):
+        tier = "developer"
+
+    if tier == "admin" and role != "admin":
+        return jsonify(
+            error="forbidden",
+            detail="Only Admin accounts can create Admin-tier content.",
+        ), 403
+
+    title = (body.get("title") or "").strip()
+    category = (body.get("category") or "General").strip()
+    content_body = (body.get("content_body") or "").strip()
+    config_note = (body.get("config_note") or "").strip()
+
+    if not title or not content_body:
+        return jsonify(error="invalid_input", detail="Title and content body are required."), 400
+
+    with _get_db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO authlab_content (tier, title, category, content_body, config_note, updated_by)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING id;
+                """,
+                (tier, title, category, content_body, config_note, g.username),
+            )
+            new_id = cur.fetchone()[0]
+        conn.commit()
+
+    return jsonify(status="created", id=new_id, message=f"Created {tier.upper()} content '{title}'."), 201
+
+
+@app.put("/api/authlab/content/<int:item_id>")
+@require_authlab_auth
+def update_authlab_content(item_id):
+    role = g.primary_role
+    if role not in ("developer", "admin"):
+        return jsonify(
+            error="forbidden",
+            detail="Reader ('viewer') accounts are read-only and cannot edit content.",
+        ), 403
+
+    body = request.get_json(silent=True) or {}
+    title = (body.get("title") or "").strip()
+    content_body = (body.get("content_body") or "").strip()
+    config_note = (body.get("config_note") or "").strip()
+
+    with _get_db_conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM authlab_content WHERE id = %s;", (item_id,))
+            existing = cur.fetchone()
+            if not existing:
+                return jsonify(error="not_found", detail="Content item not found."), 404
+
+            if existing["tier"] == "admin" and role != "admin":
+                return jsonify(
+                    error="forbidden",
+                    detail="Developer accounts cannot modify Admin-tier content.",
+                ), 403
+
+            cur.execute(
+                """
+                UPDATE authlab_content
+                SET title = COALESCE(NULLIF(%s, ''), title),
+                    content_body = COALESCE(NULLIF(%s, ''), content_body),
+                    config_note = %s,
+                    updated_by = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s;
+                """,
+                (title, content_body, config_note, g.username, item_id),
+            )
+        conn.commit()
+
+    return jsonify(status="updated", id=item_id, message=f"Updated '{existing['title']}' (by {g.username}).")
+
+
+@app.delete("/api/authlab/content/<int:item_id>")
+@require_authlab_auth
+def delete_authlab_content(item_id):
+    if g.primary_role != "admin":
+        return jsonify(
+            error="forbidden",
+            detail="Only Admin ('admin') accounts can delete content items.",
+        ), 403
+
+    with _get_db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM authlab_content WHERE id = %s;", (item_id,))
+        conn.commit()
+
+    return jsonify(status="deleted", id=item_id, message=f"Deleted content item #{item_id}.")
+
+
+_ensure_authlab_realm()
