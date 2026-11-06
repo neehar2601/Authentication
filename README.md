@@ -1,56 +1,89 @@
-# 🌾 FarmSight 360 — Keycloak Integrated Sample Application
+# AuthLab & Identity Security Engineering Platform
 
-A streamlined sample application modeled after **FarmSight 360**, integrated with a dedicated **Keycloak Realm (`farm360`)** and **PostgreSQL** database.
-
-- **Users (Farmers & Service Providers)** sign in or self-register through the web application (`http://localhost:3000`) or via the Keycloak Hosted Login Page (`http://localhost:8080/realms/farm360/...`).
-- **Administrators** manage users, reset login passwords, assign roles/groups, and enable/disable accounts directly through the official **Keycloak Admin Console Webpage** (`http://localhost:8080/admin/master/console/#/farm360/users`).
+A multi-phase identity, authentication, and token security engineering lab.
 
 ---
 
-## 🚀 Quick Start (Docker Compose)
+## 🏛️ Project Architecture & Phases
+
+```
+authlab-lab/
+├── phase-1/              # Phase 1: Keycloak 26 Identity Stack & Multi-Tier RBAC App
+│   ├── docker-compose.yml# Keycloak + PostgreSQL + Resource API + Nginx Frontend
+│   ├── api/              # Flask Resource API with RS256 token verification & DB sync
+│   ├── frontend/         # Interactive UI: FarmSight 360 & AuthLab Access Showcase
+│   ├── demo_auth.sh      # CLI token test script
+│   ├── README.md         # Full setup guide for Phase 1
+│   └── PHASE1_MINIMAL_GUIDE.md # Minimal reference guide
+│
+├── phase-2/              # Phase 2: JWT Attack & Defense Lab (Build & Break JWTs)
+│   ├── auth.py           # In-memory KeyStore, rotation, secure vs naive verifiers
+│   ├── app.py            # Standalone API with /token & /.well-known/jwks.json
+│   ├── requirements.txt  # flask, pyjwt[crypto], pytest
+│   ├── pytest.ini        # Test runner configuration
+│   ├── README.md         # Attack matrix & defense guide
+│   └── tests/
+│       └── test_jwt_attacks.py # 16 automated security exploit tests
+│
+└── README.md             # This master directory index
+```
+
+---
+
+## 🚀 Quick Start Guide
+
+### 🌾 Phase 1: Keycloak + PostgreSQL + Multi-Tier RBAC Web App
+
+Phase 1 provides an enterprise-style OAuth2/OIDC stack with **Keycloak 26**, **PostgreSQL 16**, a **Flask API**, and a modern web dashboard.
 
 ```bash
+cd phase-1
+
+# 1. Prepare environment
+cp .env.example .env
+
+# 2. Start services (PostgreSQL, Keycloak, Flask API, Nginx Web UI)
 docker compose up -d --build
 ```
 
+#### Services Available:
 | Service | URL | Purpose |
 |---|---|---|
-| **FarmSight 360 Web App** | http://localhost:3000 | Login, Register, Farm & Crop Management, Workforce Attendance, Service Marketplace, Finances |
-| **Flask Resource API** | http://localhost:5001/health | Validates Keycloak RS256 JWTs (`farm360` realm) & serves PostgreSQL data |
-| **Keycloak Admin Webpage** | http://localhost:8080/admin/master/console/#/farm360/users | Official Keycloak Admin Console for user management, roles, groups & password resets |
+| **FarmSight 360 Portal** | `http://localhost:3000` | Sample agricultural app with roles `farmer` & `service_provider` |
+| **AuthLab RBAC Showcase** | `http://localhost:3000/authlab.html` | Multi-tier content portal dynamically filtered for `viewer`, `developer`, `admin` |
+| **Resource API** | `http://localhost:5001/health` | RS256 JWT validation, JWKS fetching, role scoping |
+| **Keycloak Admin Console** | `http://localhost:8080/admin` | Master admin console (`admin` / `Admin@2601` or `.env` credentials) |
+
+👉 **Read the complete Phase 1 documentation**: [phase-1/README.md](file:///home/neehar/Documents/authlab-lab/phase-1/README.md)
 
 ---
 
-## 🔐 Keycloak Realm & Pre-Seeded Accounts
+### 🛡️ Phase 2: JWT Attack & Defense Lab
 
-On startup, the API automatically provisions the **`farm360`** realm in Keycloak with:
-- **Realm**: `farm360` (Self-registration enabled, password reset enabled)
-- **OIDC Public Client**: `farm360-web` (Standard Authorization Code Flow + Direct Access Grants enabled)
-- **Realm Roles & Groups**:
-  - `farmer` (`Farmers` group)
-  - `service_provider` (`ServiceProviders` group)
-  - `admin` (`Admins` group)
+Phase 2 is a lightweight, self-contained Python security playground designed to build and systematically break a JWT issuer without needing Keycloak.
 
-### Demo User Accounts (Realm: `farm360`)
+```bash
+cd phase-2
 
-| Username | Password | Role | Description |
-|---|---|---|---|
-| `ramesh` | `ramesh123` | `farmer` | Farm Owner — manages crop plots, worker attendance, finances, and books services |
-| `kiran` | `kiran123` | `service_provider` | Agricultural Contractor — lists equipment/services and updates booking statuses |
-| `admin_farm` | `admin123` | `admin` | Platform Administrator account in the `farm360` realm |
+# 1. Create virtual environment and install dependencies
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 
-### 🛡️ Keycloak Master Admin Credentials (for `:8080/admin`)
-- **URL**: http://localhost:8080/admin/master/console/#/farm360/users
-- **Username**: `admin` (from `.env` `KC_ADMIN_USER`)
-- **Password**: `Admin@2601` (from `.env` `KC_ADMIN_PASSWORD`)
+# 2. Run the automated exploit suite (16 tests covering all attack vectors)
+pytest -v
 
----
+# 3. (Optional) Run the standalone token issuer API on port 5001
+python app.py
+```
 
-## 🧩 Core FarmSight 360 Modules Included
-1. **🔐 Authentication Gate**:
-   - **Sign In**: Direct login against Keycloak `farm360` realm, 1-click Demo Login buttons (`ramesh` / `kiran`), or OIDC Redirect to Keycloak's Hosted Login Page.
-   - **Register**: Self-service registration (`POST /api/register`) that creates the user in Keycloak's `farm360` realm, assigns their role & group (`farmer` or `service_provider`), and signs them in.
-2. **🌾 Farms & Crops**: Add farm plots, track acreage, expected harvest yields (kg), and update crop growth stages (`Planted` → `Growing` → `Flowering` → `Ready for Harvest` → `Harvested`).
-3. **👷 Workforce & Attendance**: Add farm workers and mark daily muster roll attendance (`Present`, `Half-Day`, `Absent`).
-4. **🚜 Service Provider Marketplace & Bookings**: Browse and book contractor services (drone spraying, harvesters, soil testing), list new services, and update booking statuses (`Pending` → `Confirmed` → `Completed`).
-5. **💰 Farm Finance Ledger**: Track farm income (harvest sales) and expenses (wages, inputs, completed service bookings).
+#### Attack Vectors Tested & Proved:
+- **`alg: "none"` bypass**: Stripping the signature; fools naive verifiers, rejected by strict allow-lists.
+- **`alg: "HS256"` Key Confusion (CVE-2015-9235)**: Reusing public key PEM as an HMAC secret; fools naive verifiers, rejected by asymmetric allow-lists.
+- **Payload Tampering**: Modifying role claims without signing key; caught by RSA signature check.
+- **Attacker Key Substitution**: Signing with rogue RSA key while claiming legitimate `kid`.
+- **Token Expiration / Replay**: Expired tokens rejected via mandatory `exp` claim checks.
+- **Audience & Issuer Confusion**: Tokens intended for other services rejected via `aud` / `iss` pinning.
+- **Key Rotation & Retirement**: Graceful rotation via JWKS; retired keys immediately stop validating.
+
+👉 **Read the complete Phase 2 documentation**: [phase-2/README.md](file:///home/neehar/Documents/authlab-lab/phase-2/README.md)

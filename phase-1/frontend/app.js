@@ -309,8 +309,8 @@ function renderCrops(crops) {
         c.stage === 'Ready for Harvest'
           ? 'badge-amber'
           : c.stage === 'Harvested'
-          ? 'badge-blue'
-          : 'badge-green';
+            ? 'badge-blue'
+            : 'badge-green';
 
       return `
         <tr>
@@ -342,8 +342,8 @@ function renderWorkers(workers) {
         w.attendance_status === 'Present'
           ? 'badge-green'
           : w.attendance_status === 'Half-Day'
-          ? 'badge-amber'
-          : 'badge-red';
+            ? 'badge-amber'
+            : 'badge-red';
       return `
         <tr>
           <td><strong>${escapeHtml(w.worker_name)}</strong></td>
@@ -397,8 +397,8 @@ function renderMarketplace(services, bookings) {
         b.status === 'Completed'
           ? 'badge-green'
           : b.status === 'Confirmed'
-          ? 'badge-blue'
-          : 'badge-amber';
+            ? 'badge-blue'
+            : 'badge-amber';
       return `
         <tr>
           <td>
