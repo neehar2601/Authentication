@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AuthLab Phase 2 — Interactive Identity & JWT Test Suite</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- =====================================================================
+       TOPBAR NAVIGATION
+       ===================================================================== -->
+  <header class="topbar">
+    <div class="topbar-brand">
+      <div class="brand-logo">🛡️</div>
+      <div>
+        <div class="brand-title">AuthLab Phase 2 — Interactive Test Suite</div>
+        <div class="brand-subtitle">Keycloak Realm: <code>Authlab</code> &bull; Resource API: <code>:5000</code></div>
+      </div>
+    </div>
+
+    <div class="topbar-actions">
+      <span id="kc-status-pill" class="status-pill">
+        <span class="status-dot"></span>
+        <span id="kc-status-text">Checking Keycloak...</span>
+      </span>
+
+      <a
+        href="http://localhost:8080/admin/master/console/#/Authlab/users"
+        target="_blank"
+        rel="noopener"
+        class="btn btn-outline-amber"
+        title="Open Keycloak Admin Console in new tab"
+      >
+        🛡️ Keycloak Admin Console (:8080) ↗
+      </a>
+
+      <div id="nav-user-controls" class="nav-user-controls hidden">
+        <div class="user-chip">
+          <span id="nav-user-icon">👤</span>
+          <div>
+            <div id="nav-user-name" class="user-chip-name">alice</div>
+            <div id="nav-user-role" class="user-chip-role">Role: User</div>
+          </div>
+        </div>
+        <button type="button" class="btn btn-danger-soft btn-sm" onclick="logout()">
+          Sign Out
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- =====================================================================
+       MAIN INTERFACE
+       ===================================================================== -->
+  <main class="main-container">
+    <!-- NAVIGATION TABS -->
+    <nav class="nav-tabs">
+      <button type="button" class="tab-btn active" data-tab="tab-rbac" onclick="switchTab('tab-rbac')">
+        🔐 Keycloak RBAC Test Bench
+      </button>
+      <button type="button" class="tab-btn" data-tab="tab-attacks" onclick="switchTab('tab-attacks')">
+        💥 JWT Attack &amp; Defense Simulator
+      </button>
+      <button type="button" class="tab-btn" data-tab="tab-jwks" onclick="switchTab('tab-jwks')">
+        🔑 Live JWKS &amp; Key Inspector
+      </button>
+    </nav>
+
+    <div id="global-toast" class="toast hidden"></div>
+
+    <!-- ===================================================================
+         TAB 1: KEYCLOAK RBAC TEST BENCH
+         =================================================================== -->
+    <section id="tab-rbac" class="tab-content active">
+      <div class="grid-2-col">
+        <!-- LEFT COLUMN: AUTHENTICATION & TOKEN VIEWER -->
+        <div class="col-left">
+          <!-- 1. Quick Auth Card -->
+          <div class="card">
+            <div class="card-header">
+              <h3>⚡ Quick Sign-In (Keycloak <code>Authlab</code> Realm)</h3>
+              <span class="badge badge-green">Direct Password Grant</span>
+            </div>
+            <p class="text-muted text-sm" style="margin-bottom: 0.9rem;">
+              Click a pre-seeded account to authenticate against Keycloak's token endpoint (<code>client_id: authlab-web</code>):
+            </p>
+
+            <div class="demo-buttons-grid">
+              <button type="button" class="demo-card-btn" onclick="quickLogin('alice', 'alice123')">
+                <div class="demo-card-top">
+                  <span class="demo-icon">👩‍💻</span>
+                  <strong>alice</strong>
+                </div>
+                <div class="demo-role-badge badge-blue">Role: User / viewer</div>
+                <div class="demo-pw text-xs">pw: <code>alice123</code></div>
+              </button>
+
+              <button type="button" class="demo-card-btn" onclick="quickLogin('bob', 'bob123')">
+                <div class="demo-card-top">
+                  <span class="demo-icon">🛡️</span>
+                  <strong>bob</strong>
+                </div>
+                <div class="demo-role-badge badge-amber">Role: Admin</div>
+                <div class="demo-pw text-xs">pw: <code>bob123</code></div>
+              </button>
+
+              <button type="button" class="demo-card-btn" onclick="quickLogin('drench', 'drench123')">
+                <div class="demo-card-top">
+                  <span class="demo-icon">🧑‍💻</span>
+                  <strong>drench</strong>
+                </div>
+                <div class="demo-role-badge badge-purple">Role: Developer</div>
+                <div class="demo-pw text-xs">pw: <code>drench123</code></div>
+              </button>
+            </div>
+
+            <!-- Manual Login Accordion -->
+            <details class="manual-login-details">
+              <summary>Or sign in with custom credentials...</summary>
+              <form class="custom-login-form" onsubmit="handleManualLogin(event)">
+                <div class="form-row">
+                  <input type="text" id="custom-user" class="form-input" placeholder="Username" required />
+                  <input type="password" id="custom-pw" class="form-input" placeholder="Password" required />
+                </div>
+                <button type="submit" class="btn btn-primary btn-sm" style="margin-top: 0.5rem; width: 100%;">
+                  Sign In via Keycloak
+                </button>
+              </form>
+            </details>
+          </div>
+
+          <!-- 2. Active Token Inspector Card -->
+          <div class="card" id="token-card">
+            <div class="card-header">
+              <h3>🔑 Active RS256 JWT Token</h3>
+              <div class="token-header-actions">
+                <button type="button" class="btn btn-ghost btn-sm" onclick="copyTokenToClipboard()">
+                  📋 Copy
+                </button>
+                <button type="button" class="btn btn-danger-soft btn-sm" onclick="clearToken()">
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div id="token-empty-state" class="empty-state">
+              <span>⚠️ No active token. Click a sign-in card above to mint a Keycloak JWT.</span>
+            </div>
+
+            <div id="token-active-state" class="hidden">
+              <div class="token-claims-summary">
+                <div class="claim-item">
+                  <span class="claim-label">Subject (sub)</span>
+                  <span class="claim-val" id="claim-sub">-</span>
+                </div>
+                <div class="claim-item">
+                  <span class="claim-label">Username</span>
+                  <span class="claim-val" id="claim-user">-</span>
+                </div>
+                <div class="claim-item">
+                  <span class="claim-label">Audience (aud)</span>
+                  <span class="claim-val" id="claim-aud">-</span>
+                </div>
+                <div class="claim-item">
+                  <span class="claim-label">Realm Roles</span>
+                  <span class="claim-val" id="claim-roles">-</span>
+                </div>
+                <div class="claim-item">
+                  <span class="claim-label">Expires In</span>
+                  <span class="claim-val text-green" id="claim-exp">-</span>
+                </div>
+              </div>
+
+              <!-- Collapsible Raw Decoded Claims -->
+              <details class="token-raw-details">
+                <summary>Inspect Complete Decoded JWT JSON</summary>
+                <pre class="code-pre text-xs" id="raw-jwt-json"></pre>
+              </details>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT COLUMN: ENDPOINT RUNNER & RESPONSE CONSOLE -->
+        <div class="col-right">
+          <!-- 1. Endpoint Runner -->
+          <div class="card">
+            <div class="card-header">
+              <h3>🚀 Resource API Test Bench (Port <code>:5000</code>)</h3>
+              <span class="badge badge-gray">Auto-injects Bearer Token</span>
+            </div>
+            <p class="text-muted text-sm" style="margin-bottom: 0.9rem;">
+              Click an endpoint to test how the Flask resource API enforces RS256 signature verification and Role-Based Access Control:
+            </p>
+
+            <div class="endpoints-list">
+              <!-- Endpoint 1: Public -->
+              <div class="endpoint-row">
+                <div class="endpoint-info">
+                  <span class="method-tag method-get">GET</span>
+                  <code class="endpoint-path">/api/public</code>
+                  <span class="endpoint-rule">Public (No Token Required)</span>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="callApi('/api/public', false)">
+                  Test ↗
+                </button>
+              </div>
+
+              <!-- Endpoint 2: /api/me -->
+              <div class="endpoint-row">
+                <div class="endpoint-info">
+                  <span class="method-tag method-get">GET</span>
+                  <code class="endpoint-path">/api/me</code>
+                  <span class="endpoint-rule">Protected (Any Valid Token)</span>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="callApi('/api/me')">
+                  Test ↗
+                </button>
+              </div>
+
+              <!-- Endpoint 3: /api/users -->
+              <div class="endpoint-row">
+                <div class="endpoint-info">
+                  <span class="method-tag method-get">GET</span>
+                  <code class="endpoint-path">/api/users</code>
+                  <span class="endpoint-rule">Requires Role: <code>viewer</code>, <code>developer</code>, or <code>admin</code></span>
+                </div>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="callApi('/api/users')">
+                  Test ↗
+                </button>
+              </div>
+
+              <!-- Endpoint 4: /api/admin/users -->
+              <div class="endpoint-row highlight-admin">
+                <div class="endpoint-info">
+                  <span class="method-tag method-get">GET</span>
+                  <code class="endpoint-path">/api/admin/users</code>
+                  <span class="endpoint-rule text-amber font-semibold">Strict Admin Only (Role: <code>admin</code>)</span>
+                </div>
+                <button type="button" class="btn btn-amber btn-sm" onclick="callApi('/api/admin/users')">
+                  Test ↗
+                </button>
+              </div>
+
+              <!-- Endpoint 5: /health -->
+              <div class="endpoint-row">
+                <div class="endpoint-info">
+                  <span class="method-tag method-get">GET</span>
+                  <code class="endpoint-path">/health</code>
+                  <span class="endpoint-rule">API Health Check</span>
+                </div>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="callApi('/health', false)">
+                  Test ↗
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 2. Live HTTP Response Console -->
+          <div class="card">
+            <div class="card-header">
+              <h3>📡 Live HTTP Response Console</h3>
+              <span id="response-status-badge" class="badge badge-gray">No request sent</span>
+            </div>
+
+            <div class="console-meta" id="console-meta">
+              <div><span>Target:</span> <code id="resp-target">-</code></div>
+              <div><span>Latency:</span> <span id="resp-time">-</span></div>
+            </div>
+
+            <pre class="code-pre" id="response-console-output">// Output will appear here when you test an endpoint above...</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================================================================
+         TAB 2: JWT ATTACK & EXPLOIT SIMULATOR
+         =================================================================== -->
+    <section id="tab-attacks" class="tab-content">
+      <div class="attack-intro-banner">
+        <div>
+          <h3>💥 Phase 2 Cryptographic Attack &amp; Defense Simulator</h3>
+          <p>
+            Test classic JWT exploits against the server. Watch the difference between a <strong>naive verifier</strong> (which trusts token headers blindly) and the <strong>hardened verifier</strong> (which enforces strict RS256 pinning and claim validation).
+          </p>
+        </div>
+        <button type="button" class="btn btn-primary" onclick="runAllAttackTests()">
+          ▶ Run All 5 Attack Tests
+        </button>
+      </div>
+
+      <div class="attacks-grid">
+        <!-- Attack Card 1: alg: none -->
+        <div class="attack-card" id="card-attack-none">
+          <div class="attack-card-header">
+            <div class="attack-badge">EXPLOIT 1</div>
+            <h4>Signature Stripping (<code>alg: "none"</code>)</h4>
+          </div>
+          <p class="attack-desc">
+            An attacker crafts a token claiming <code>roles: ["admin"]</code> and changes the JOSE header to <code>{"alg": "none"}</code>, removing the signature entirely.
+          </p>
+
+          <div class="exploit-payload-box">
+            <code>{"alg": "none", "typ": "JWT"}.{"sub": "mallory", "roles": ["admin"]}.&lt;empty&gt;</code>
+          </div>
+
+          <div class="attack-verdict" id="verdict-none">
+            <div class="verdict-item naive-fail">
+              <span>Naive Verifier:</span> <strong>💥 VULNERABLE</strong> (accepts unsigned token!)
+            </div>
+            <div class="verdict-item secure-pass">
+              <span>Secure Verifier:</span> <strong>🛡️ PROTECTED</strong> (pinned to RS256, rejects <code>none</code>)
+            </div>
+          </div>
+
+          <button type="button" class="btn btn-outline-danger btn-block" onclick="testAttackNone()">
+            ⚡ Test "alg: none" Exploit Live
+          </button>
+        </div>
+
+        <!-- Attack Card 2: HS256 Key Confusion -->
+        <div class="attack-card" id="card-attack-hs256">
+          <div class="attack-card-header">
+            <div class="attack-badge">EXPLOIT 2 (CVE-2015-9235)</div>
+            <h4>RSA Public Key Confusion (<code>alg: "HS256"</code>)</h4>
+          </div>
+          <p class="attack-desc">
+            The attacker fetches the server's <strong>public key PEM</strong> from JWKS, crafts a token with <code>alg: "HS256"</code>, and signs it using the public key as the HMAC secret!
+          </p>
+
+          <div class="exploit-payload-box">
+            <code>HMAC-SHA256(header.payload, secret = Server_Public_RSA_PEM)</code>
+          </div>
+
+          <div class="attack-verdict" id="verdict-hs256">
+            <div class="verdict-item naive-fail">
+              <span>Naive Verifier:</span> <strong>💥 VULNERABLE</strong> (treats public key as HMAC secret!)
+            </div>
+            <div class="verdict-item secure-pass">
+              <span>Secure Verifier:</span> <strong>🛡️ PROTECTED</strong> (rejects HMAC on RS256 endpoint)
+            </div>
+          </div>
+
+          <button type="button" class="btn btn-outline-danger btn-block" onclick="testAttackKeyConfusion()">
+            ⚡ Test Key Confusion Exploit Live
+          </button>
+        </div>
+
+        <!-- Attack Card 3: Payload Tampering -->
+        <div class="attack-card" id="card-attack-tamper">
+          <div class="attack-card-header">
+            <div class="attack-badge">EXPLOIT 3</div>
+            <h4>Payload Claim Tampering</h4>
+          </div>
+          <p class="attack-desc">
+            Takes Alice's legitimate token (<code>roles: ["User"]</code>) and manually edits the payload base64 to <code>roles: ["admin"]</code> without re-signing.
+          </p>
+
+          <div class="exploit-payload-box">
+            <code>Original_Header.Base64({"roles": ["admin"]}).Original_Signature</code>
+          </div>
+
+          <div class="attack-verdict" id="verdict-tamper">
+            <div class="verdict-item secure-pass">
+              <span>Secure Verifier:</span> <strong>🛡️ PROTECTED</strong> (<code>InvalidSignatureError</code>)
+            </div>
+          </div>
+
+          <button type="button" class="btn btn-outline-danger btn-block" onclick="testAttackTamper()">
+            ⚡ Test Payload Tampering Live
+          </button>
+        </div>
+
+        <!-- Attack Card 4: Expired Token Replay -->
+        <div class="attack-card" id="card-attack-replay">
+          <div class="attack-card-header">
+            <div class="attack-badge">EXPLOIT 4</div>
+            <h4>Expired Token Replay</h4>
+          </div>
+          <p class="attack-desc">
+            An attacker intercepts an old token whose expiration timestamp (<code>exp</code>) is in the past and attempts to reuse it.
+          </p>
+
+          <div class="exploit-payload-box">
+            <code>payload.exp = now - 3600 (Expired 1 hour ago)</code>
+          </div>
+
+          <div class="attack-verdict" id="verdict-replay">
+            <div class="verdict-item secure-pass">
+              <span>Secure Verifier:</span> <strong>🛡️ PROTECTED</strong> (<code>token_expired</code> / 401)
+            </div>
+          </div>
+
+          <button type="button" class="btn btn-outline-danger btn-block" onclick="testAttackExpired()">
+            ⚡ Test Expired Token Live
+          </button>
+        </div>
+      </div>
+
+      <!-- Attack Test Console -->
+      <div class="card" style="margin-top: 1.5rem;">
+        <div class="card-header">
+          <h3>🖥️ Attack Simulation Live Output</h3>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="clearAttackConsole()">Clear</button>
+        </div>
+        <pre class="code-pre" id="attack-console-log">// Click any attack test above to see the cryptographic execution log...</pre>
+      </div>
+    </section>
+
+    <!-- ===================================================================
+         TAB 3: LIVE JWKS & KEY INSPECTOR
+         =================================================================== -->
+    <section id="tab-jwks" class="tab-content">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h3>🔑 Live JSON Web Key Set (JWKS) Inspector</h3>
+            <p class="text-muted text-sm">
+              Fetched in real-time from Keycloak: <code>http://localhost:8080/realms/Authlab/protocol/openid-connect/certs</code>
+            </p>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="fetchLiveJwks()">
+            🔄 Refresh Keys
+          </button>
+        </div>
+
+        <div id="jwks-keys-container" class="jwks-grid">
+          <!-- Populated by JS -->
+        </div>
+
+        <div class="card-footer-note">
+          <strong>🔒 Security Guarantee:</strong> The JWKS publishes the public modulus (<code>n</code>) and public exponent (<code>e</code>) only. The private key (<code>d</code>) is never exposed, allowing anyone to verify signatures while only the issuer can sign.
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
