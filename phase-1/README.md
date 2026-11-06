@@ -1,56 +1,131 @@
-# 🌾 FarmSight 360 — Keycloak Integrated Sample Application
+# Phase 1: Keycloak Identity Stack & Multi-Tier RBAC Applications
 
-A streamlined sample application modeled after **FarmSight 360**, integrated with a dedicated **Keycloak Realm (`farm360`)** and **PostgreSQL** database.
+Phase 1 provides an enterprise-style OAuth2/OIDC identity and access management stack featuring **Keycloak 26**, **PostgreSQL 16**, a **Flask Resource API**, and two interactive web applications served via **Nginx**.
 
-- **Users (Farmers & Service Providers)** sign in or self-register through the web application (`http://localhost:3000`) or via the Keycloak Hosted Login Page (`http://localhost:8080/realms/farm360/...`).
-- **Administrators** manage users, reset login passwords, assign roles/groups, and enable/disable accounts directly through the official **Keycloak Admin Console Webpage** (`http://localhost:8080/admin/master/console/#/farm360/users`).
+---
+
+## 🏛️ Phase 1 Architecture
+
+```
+phase-1/
+├── docker-compose.yml          # Container topology (Postgres, Keycloak, Flask API, Nginx)
+├── .env / .env.example         # Passwords and Keycloak admin credentials
+├── demo_auth.sh                # CLI curl script testing Keycloak password flow & API access
+├── PHASE1_MINIMAL_GUIDE.md     # Reference guide for the minimal 83-line starter lab
+├── app_minimal_reference.py    # Clean reference API implementation
+│
+├── api/                        # Flask Resource API (Port 5001)
+│   ├── Dockerfile              # Python 3.12-slim container
+│   ├── app.py                  # API validating RS256 JWTs & scoping DB queries
+│   └── requirements.txt        # Flask, PyJWT[crypto], psycopg2-binary, gunicorn
+│
+└── frontend/                   # Web Client Applications (Port 3000)
+    ├── index.html & app.js     # FarmSight 360 Application (farm360 Realm)
+    ├── authlab.html & authlab.js # Multi-Tier Access Level Showcase (authlab Realm)
+    └── styles.css              # Unified UI stylesheet
+```
 
 ---
 
 ## 🚀 Quick Start (Docker Compose)
 
 ```bash
+cd phase-1
+
+# 1. Prepare environment variables
+cp .env.example .env
+
+# 2. Boot the entire stack
 docker compose up -d --build
 ```
 
-| Service | URL | Purpose |
-|---|---|---|
-| **FarmSight 360 Web App** | http://localhost:3000 | Login, Register, Farm & Crop Management, Workforce Attendance, Service Marketplace, Finances |
-| **Flask Resource API** | http://localhost:5001/health | Validates Keycloak RS256 JWTs (`farm360` realm) & serves PostgreSQL data |
-| **Keycloak Admin Webpage** | http://localhost:8080/admin/master/console/#/farm360/users | Official Keycloak Admin Console for user management, roles, groups & password resets |
+### Services & Endpoints:
+
+| Service | Internal Port | Host Port | URL | Description |
+|---|---|---|---|---|
+| **Web Frontend** | `80` | `3000` | http://localhost:3000 | Nginx static server hosting both web applications |
+| **Flask Resource API** | `5000` | `5001` | http://localhost:5001/health | RS256 JWT validation, JWKS fetching, DB queries |
+| **Keycloak Identity Provider** | `8080` | `8080` | http://localhost:8080 | OIDC Identity Provider with `farm360` & `authlab` realms |
+| **Keycloak Admin Console** | `8080` | `8080` | http://localhost:8080/admin | Official Keycloak administration dashboard |
+| **PostgreSQL Database** | `5432` | internal | `postgres:5432` | Backing database for Keycloak and application tables |
 
 ---
 
-## 🔐 Keycloak Realm & Pre-Seeded Accounts
+## 📱 Two Interactive Web Applications Included
 
-On startup, the API automatically provisions the **`farm360`** realm in Keycloak with:
-- **Realm**: `farm360` (Self-registration enabled, password reset enabled)
-- **OIDC Public Client**: `farm360-web` (Standard Authorization Code Flow + Direct Access Grants enabled)
-- **Realm Roles & Groups**:
-  - `farmer` (`Farmers` group)
-  - `service_provider` (`ServiceProviders` group)
-  - `admin` (`Admins` group)
+### 1. 🌾 FarmSight 360 Portal (`http://localhost:3000`)
+Modeled after **FarmSight 360**, backed by PostgreSQL tables and authenticated through Keycloak realm **`farm360`** (Client: `farm360-web`):
+- **User Roles**:
+  - `farmer`: Farm Owner — manages crop plots, records worker attendance, logs finances, and books contractor machinery.
+  - `service_provider`: Agricultural Contractor — lists equipment/services (drone spraying, harvesters) and fulfills bookings.
+  - `admin`: Platform Administrator.
+- **Core Modules**:
+  - **Farms & Crops**: Track crop stages (`Planted` → `Growing` → `Flowering` → `Ready for Harvest` → `Harvested`), acreage, and yield projections.
+  - **Workforce & Attendance**: Roster farm laborers and toggle daily attendance (`Present`, `Half-Day`, `Absent`).
+  - **Service Marketplace**: Book contractor machinery and update booking statuses (`Pending` → `Confirmed` → `Completed`).
+  - **Farm Finances**: Real-time income & expense ledger.
 
-### Demo User Accounts (Realm: `farm360`)
+### 2. 🔐 AuthLab Multi-Tier Access Showcase (`http://localhost:3000/authlab.html`)
+Demonstrates strict **Role-Based Access Control (RBAC)** where all users authenticate through the **same login page** using Keycloak realm **`authlab`**, and content is dynamically unlocked and permitted based on the user's role:
 
+| Access Level | Demo User | Visible Content | Permissions & Controls |
+|---|---|---|---|
+| **📖 Reader (`viewer`)** | `alice` / `alice123` | **Tier 1: Reader Content ONLY** | **Strict Read-Only**: Can view architecture guides, system status, and security handbooks. Developer & Admin sections are locked. |
+| **💻 Developer (`developer`)** | `dev` / `dev123` | **Tier 1 (Reader) + Tier 2 (Developer)** | **Read + Edit + Create**: Unlocks runtime feature flags, CI/CD specs, and webhooks with `💾 Save Edit` and `+ Publish Content`. Admin section is locked. |
+| **🛡️ Admin (`admin`)** | `bob` / `bob123` | **All 3 Tiers (Reader + Developer + Admin)** | **Full Control**: Unlocks database rotation policies, Zero-Trust IAM governance, and disaster recovery controls with full Create, Edit, and Delete privileges. |
+
+---
+
+## 👥 Pre-Seeded User Accounts
+
+### `authlab` Realm Accounts:
 | Username | Password | Role | Description |
 |---|---|---|---|
-| `ramesh` | `ramesh123` | `farmer` | Farm Owner — manages crop plots, worker attendance, finances, and books services |
-| `kiran` | `kiran123` | `service_provider` | Agricultural Contractor — lists equipment/services and updates booking statuses |
-| `admin_farm` | `admin123` | `admin` | Platform Administrator account in the `farm360` realm |
+| `alice` | `alice123` | `viewer` | Reader — L1 read-only access to reader content |
+| `dev` | `dev123` | `developer` | Developer — L2 read & write access to reader and developer content |
+| `bob` | `bob123` | `admin` | Admin — L3 full access to all three tiers |
 
-### 🛡️ Keycloak Master Admin Credentials (for `:8080/admin`)
-- **URL**: http://localhost:8080/admin/master/console/#/farm360/users
-- **Username**: `admin` (from `.env` `KC_ADMIN_USER`)
-- **Password**: `Admin@2601` (from `.env` `KC_ADMIN_PASSWORD`)
+### `farm360` Realm Accounts:
+| Username | Password | Role | Description |
+|---|---|---|---|
+| `ramesh` | `ramesh123` | `farmer` | Farm Owner — manages farms, crops, workers, and bookings |
+| `kiran` | `kiran123` | `service_provider` | Contractor — manages machinery listings & fulfills bookings |
+| `admin_farm`| `admin123` | `admin` | Farm platform administrator |
+
+### 🛡️ Keycloak Master Admin Console:
+- **URL**: http://localhost:8080/admin
+- **Username**: `admin` (configured in `.env`)
+- **Password**: `Admin@2601` (configured in `.env`)
 
 ---
 
-## 🧩 Core FarmSight 360 Modules Included
-1. **🔐 Authentication Gate**:
-   - **Sign In**: Direct login against Keycloak `farm360` realm, 1-click Demo Login buttons (`ramesh` / `kiran`), or OIDC Redirect to Keycloak's Hosted Login Page.
-   - **Register**: Self-service registration (`POST /api/register`) that creates the user in Keycloak's `farm360` realm, assigns their role & group (`farmer` or `service_provider`), and signs them in.
-2. **🌾 Farms & Crops**: Add farm plots, track acreage, expected harvest yields (kg), and update crop growth stages (`Planted` → `Growing` → `Flowering` → `Ready for Harvest` → `Harvested`).
-3. **👷 Workforce & Attendance**: Add farm workers and mark daily muster roll attendance (`Present`, `Half-Day`, `Absent`).
-4. **🚜 Service Provider Marketplace & Bookings**: Browse and book contractor services (drone spraying, harvesters, soil testing), list new services, and update booking statuses (`Pending` → `Confirmed` → `Completed`).
-5. **💰 Farm Finance Ledger**: Track farm income (harvest sales) and expenses (wages, inputs, completed service bookings).
+## 🔒 Token Verification Architecture (`api/app.py`)
+
+1. **JWKS Fetching**: The API uses `PyJWKClient` pointing at Keycloak's JWKS endpoint over the internal Docker network (`http://keycloak:8080/realms/<realm>/protocol/openid-connect/certs`).
+2. **Asymmetric Verification**: Validates the RS256 signature using the Keycloak public key corresponding to the token's `kid`.
+3. **Claim Validation**:
+   - `iss`: Validated against `http://localhost:8080/realms/<realm>`.
+   - `aud`: Validated against the target API audience.
+   - `exp` & `iat`: Enforced to prevent replay attacks and expired session access.
+4. **Role Enforcement**: Roles are extracted from `claims["realm_access"]["roles"]` to enforce permissions on protected endpoints.
+
+---
+
+## 🛠️ CLI Verification Script
+
+To test the Keycloak password flow and API authorization via `curl`:
+```bash
+./demo_auth.sh
+```
+
+---
+
+## 🧹 Teardown & Reset
+
+```bash
+# Stop containers
+docker compose down
+
+# Stop containers and delete PostgreSQL database volume (resets all Keycloak & application data)
+docker compose down -v
+```

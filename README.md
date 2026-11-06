@@ -30,6 +30,19 @@ authlab-lab/
 
 ---
 
+## 🧭 Phase Comparison
+
+| Dimension | [Phase 1: Enterprise IdP & App Stack](file:///home/neehar/Documents/authlab-lab/phase-1/README.md) | [Phase 2: JWT Attack & Defense Lab](file:///home/neehar/Documents/authlab-lab/phase-2/README.md) |
+|---|---|---|
+| **Primary Focus** | Complete OIDC integration, Keycloak administration, and real-world UI access control | Deep cryptographic inspection of JWT internals, attack vectors, and exploit unit tests |
+| **Identity Provider** | **Keycloak 26** (`quay.io/keycloak/keycloak:26.0`) | In-memory Python **`KeyStore`** with JWKS endpoint |
+| **Storage Tier** | **PostgreSQL 16** (`postgres:16-alpine`) | Ephemeral in-memory structures |
+| **Frontend UI** | Nginx web dashboard hosting **FarmSight 360** and **AuthLab Showcase** | CLI / Pytest automated exploit suite |
+| **Key Scenarios** | Login/Register flows, Keycloak Admin Console role updates, DB query scoping | `alg: "none"` bypass, `HS256` key confusion (CVE-2015-9235), signature tampering, key rotation |
+| **Execution** | `docker compose up -d --build` (in `phase-1/`) | `pytest -v` (in `phase-2/`) |
+
+---
+
 ## 🚀 Quick Start Guide
 
 ### 🌾 Phase 1: Keycloak + PostgreSQL + Multi-Tier RBAC Web App
