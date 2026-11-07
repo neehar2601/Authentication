@@ -3,21 +3,21 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AuthLab Phase 2 — Interactive Identity & JWT Test Suite</title>
+  <title>AuthLab Phase 2 — Privilege-Based Access Portal</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <!-- =====================================================================
-       TOPBAR NAVIGATION
+       GLOBAL TOPBAR
        ===================================================================== -->
   <header class="topbar">
     <div class="topbar-brand">
       <div class="brand-logo">🛡️</div>
       <div>
-        <div class="brand-title">AuthLab Phase 2 — Interactive Test Suite</div>
+        <div class="brand-title">AuthLab Phase 2</div>
         <div class="brand-subtitle">Keycloak Realm: <code>Authlab</code> &bull; Resource API: <code>:5000</code></div>
       </div>
     </div>
@@ -38,7 +38,11 @@
         🛡️ Keycloak Admin Console (:8080) ↗
       </a>
 
+      <!-- Authenticated User Controls (shown only when logged in) -->
       <div id="nav-user-controls" class="nav-user-controls hidden">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleTokenModal()">
+          🔑 Inspect Token
+        </button>
         <div class="user-chip">
           <span id="nav-user-icon">👤</span>
           <div>
@@ -53,393 +57,485 @@
     </div>
   </header>
 
+  <!-- Global Floating Toast Notification -->
+  <div id="global-toast" class="toast global-toast hidden"></div>
+
   <!-- =====================================================================
-       MAIN INTERFACE
+       VIEW 1: LOGIN PAGE (SHOWN WHEN NOT LOGGED IN)
        ===================================================================== -->
-  <main class="main-container">
-    <!-- NAVIGATION TABS -->
-    <nav class="nav-tabs">
-      <button type="button" class="tab-btn active" data-tab="tab-rbac" onclick="switchTab('tab-rbac')">
-        🔐 Keycloak RBAC Test Bench
+  <main id="auth-view" class="auth-view-container">
+    <div class="login-grid">
+      <!-- Left Card: Login Form -->
+      <div class="card login-card">
+        <div class="login-header">
+          <div class="login-badge">OIDC PASSWORD GRANT &bull; RS256</div>
+          <h2>Sign In to AuthLab</h2>
+          <p class="text-muted text-sm">
+            Authenticate against Keycloak realm <code>Authlab</code> (Client: <code>authlab-web</code>). Your access privileges are determined dynamically by your assigned realm roles.
+          </p>
+        </div>
+
+        <div id="login-alert" class="alert-box hidden"></div>
+
+        <form id="login-form" onsubmit="handleFormLogin(event)">
+          <div class="form-group">
+            <label for="input-username">Username</label>
+            <input
+              type="text"
+              id="input-username"
+              class="form-input"
+              placeholder="e.g. alice, drench, or bob"
+              required
+              autocomplete="username"
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="input-password">Password</label>
+            <input
+              type="password"
+              id="input-password"
+              class="form-input"
+              placeholder="Enter account password"
+              required
+              autocomplete="current-password"
+            />
+          </div>
+
+          <button type="submit" id="login-submit-btn" class="btn btn-primary btn-block">
+            Sign In with Keycloak
+          </button>
+        </form>
+
+        <div class="divider"><span>OR 1-CLICK DEMO ACCOUNTS</span></div>
+
+        <div class="demo-accounts-grid">
+          <button type="button" class="demo-acc-btn" onclick="quickLogin('alice', 'alice123')">
+            <div class="demo-acc-top">
+              <span class="demo-acc-icon">📖</span>
+              <strong>alice</strong>
+            </div>
+            <div class="badge badge-blue">Role: User (Reader)</div>
+            <div class="demo-acc-pw text-xs text-muted">pw: <code>alice123</code></div>
+          </button>
+
+          <button type="button" class="demo-acc-btn" onclick="quickLogin('drench', 'drench123')">
+            <div class="demo-acc-top">
+              <span class="demo-acc-icon">🧑‍💻</span>
+              <strong>drench</strong>
+            </div>
+            <div class="badge badge-purple">Role: Developer</div>
+            <div class="demo-acc-pw text-xs text-muted">pw: <code>drench123</code></div>
+          </button>
+
+          <button type="button" class="demo-acc-btn" onclick="quickLogin('bob', 'bob123')">
+            <div class="demo-acc-top">
+              <span class="demo-acc-icon">🛡️</span>
+              <strong>bob</strong>
+            </div>
+            <div class="badge badge-amber">Role: Admin</div>
+            <div class="demo-acc-pw text-xs text-muted">pw: <code>bob123</code></div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Right Card: Privilege Tiers Explanation -->
+      <div class="card login-info-card">
+        <div class="info-tag">HOW PRIVILEGES WORK</div>
+        <h3>Role-Based Access Control Architecture</h3>
+        <p class="text-sm text-secondary" style="margin-bottom: 1.25rem;">
+          When you sign in, Keycloak mints an RS256 JWT access token. The resource API at <code>http://localhost:5000</code> cryptographically validates the token against Keycloak's public keys via JWKS and checks <code>realm_access.roles</code> to grant or restrict features:
+        </p>
+
+        <div class="privilege-features">
+          <div class="privilege-box tier-reader">
+            <div class="privilege-box-header">
+              <span class="tier-icon">📖</span>
+              <div>
+                <strong>Level 1: Reader Privilege</strong>
+                <span class="tier-role-code">Role: <code>User</code> / <code>viewer</code> (e.g. <code>alice</code>)</span>
+              </div>
+            </div>
+            <p class="text-xs text-muted">
+              Access to general knowledge base, architecture documentation, and public company directory in strict read-only mode. Developer and Admin areas are locked.
+            </p>
+          </div>
+
+          <div class="privilege-box tier-developer">
+            <div class="privilege-box-header">
+              <span class="tier-icon">🧑‍💻</span>
+              <div>
+                <strong>Level 2: Developer Privilege</strong>
+                <span class="tier-role-code">Role: <code>Developer</code> (e.g. <code>drench</code>)</span>
+              </div>
+            </div>
+            <p class="text-xs text-muted">
+              Unlocks Level 1 (Reader) + Level 2: Staging environments, runtime feature flags, service topologies, and build pipeline configs. Admin area remains locked.
+            </p>
+          </div>
+
+          <div class="privilege-box tier-admin">
+            <div class="privilege-box-header">
+              <span class="tier-icon">🛡️</span>
+              <div>
+                <strong>Level 3: Administrator Privilege</strong>
+                <span class="tier-role-code">Role: <code>Admin</code> (e.g. <code>bob</code>)</span>
+              </div>
+            </div>
+            <p class="text-xs text-muted">
+              Full unhindered control across all 3 tiers. Unlocks Security Governance, system audit logs, token revocation controls, and Identity Provider key rotation.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- =====================================================================
+       VIEW 2: AUTHENTICATED DASHBOARD (SHOWN ONLY WHEN LOGGED IN)
+       ===================================================================== -->
+  <main id="dashboard-view" class="dashboard-view-container hidden">
+    <!-- Active Privilege Hero Banner -->
+    <section class="hero-privilege-banner" id="hero-banner">
+      <div class="hero-left">
+        <div class="hero-eyebrow">Authenticated via Keycloak (Realm: <code>Authlab</code>)</div>
+        <h2 id="hero-title">Welcome, Alice!</h2>
+        <p id="hero-desc">You are logged in with Reader privileges.</p>
+      </div>
+
+      <div class="hero-right">
+        <!-- Visual Privilege Status Pills -->
+        <div class="privilege-status-pills" id="privilege-status-pills">
+          <span class="status-pill-item unlocked" id="pill-tier-1">
+            <span class="pill-dot"></span> Tier 1: Reader (Unlocked)
+          </span>
+          <span class="status-pill-item locked" id="pill-tier-2">
+            <span class="pill-dot"></span> Tier 2: Developer (Locked)
+          </span>
+          <span class="status-pill-item locked" id="pill-tier-3">
+            <span class="pill-dot"></span> Tier 3: Admin (Locked)
+          </span>
+        </div>
+
+        <!-- Quick Switch User Pill Buttons -->
+        <div class="quick-switch-bar">
+          <span class="text-xs text-muted">Quick Switch User:</span>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="quickLogin('alice', 'alice123')" title="Switch to alice (Reader)">
+            📖 alice
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="quickLogin('drench', 'drench123')" title="Switch to drench (Developer)">
+            🧑‍💻 drench
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="quickLogin('bob', 'bob123')" title="Switch to bob (Admin)">
+            🛡️ bob
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sub-navigation Tabs -->
+    <div class="subnav-tabs">
+      <button type="button" class="subnav-tab active" data-subtab="view-workspaces" onclick="switchSubTab('view-workspaces')">
+        🏛️ My Privileged Workspaces
       </button>
-      <button type="button" class="tab-btn" data-tab="tab-attacks" onclick="switchTab('tab-attacks')">
+      <button type="button" class="subnav-tab" data-subtab="view-attacks" onclick="switchSubTab('view-attacks')">
         💥 JWT Attack &amp; Defense Simulator
       </button>
-      <button type="button" class="tab-btn" data-tab="tab-jwks" onclick="switchTab('tab-jwks')">
-        🔑 Live JWKS &amp; Key Inspector
+      <button type="button" class="subnav-tab" data-subtab="view-jwks" onclick="switchSubTab('view-jwks')">
+        🔑 Keycloak Live JWKS
       </button>
-    </nav>
+    </div>
 
-    <div id="global-toast" class="toast hidden"></div>
-
-    <!-- ===================================================================
-         TAB 1: KEYCLOAK RBAC TEST BENCH
-         =================================================================== -->
-    <section id="tab-rbac" class="tab-content active">
-      <div class="grid-2-col">
-        <!-- LEFT COLUMN: AUTHENTICATION & TOKEN VIEWER -->
-        <div class="col-left">
-          <!-- 1. Quick Auth Card -->
-          <div class="card">
-            <div class="card-header">
-              <h3>⚡ Quick Sign-In (Keycloak <code>Authlab</code> Realm)</h3>
-              <span class="badge badge-green">Direct Password Grant</span>
-            </div>
-            <p class="text-muted text-sm" style="margin-bottom: 0.9rem;">
-              Click a pre-seeded account to authenticate against Keycloak's token endpoint (<code>client_id: authlab-web</code>):
-            </p>
-
-            <div class="demo-buttons-grid">
-              <button type="button" class="demo-card-btn" onclick="quickLogin('alice', 'alice123')">
-                <div class="demo-card-top">
-                  <span class="demo-icon">👩‍💻</span>
-                  <strong>alice</strong>
-                </div>
-                <div class="demo-role-badge badge-blue">Role: User / viewer</div>
-                <div class="demo-pw text-xs">pw: <code>alice123</code></div>
-              </button>
-
-              <button type="button" class="demo-card-btn" onclick="quickLogin('bob', 'bob123')">
-                <div class="demo-card-top">
-                  <span class="demo-icon">🛡️</span>
-                  <strong>bob</strong>
-                </div>
-                <div class="demo-role-badge badge-amber">Role: Admin</div>
-                <div class="demo-pw text-xs">pw: <code>bob123</code></div>
-              </button>
-
-              <button type="button" class="demo-card-btn" onclick="quickLogin('drench', 'drench123')">
-                <div class="demo-card-top">
-                  <span class="demo-icon">🧑‍💻</span>
-                  <strong>drench</strong>
-                </div>
-                <div class="demo-role-badge badge-purple">Role: Developer</div>
-                <div class="demo-pw text-xs">pw: <code>drench123</code></div>
-              </button>
-            </div>
-
-            <!-- Manual Login Accordion -->
-            <details class="manual-login-details">
-              <summary>Or sign in with custom credentials...</summary>
-              <form class="custom-login-form" onsubmit="handleManualLogin(event)">
-                <div class="form-row">
-                  <input type="text" id="custom-user" class="form-input" placeholder="Username" required />
-                  <input type="password" id="custom-pw" class="form-input" placeholder="Password" required />
-                </div>
-                <button type="submit" class="btn btn-primary btn-sm" style="margin-top: 0.5rem; width: 100%;">
-                  Sign In via Keycloak
-                </button>
-              </form>
-            </details>
-          </div>
-
-          <!-- 2. Active Token Inspector Card -->
-          <div class="card" id="token-card">
-            <div class="card-header">
-              <h3>🔑 Active RS256 JWT Token</h3>
-              <div class="token-header-actions">
-                <button type="button" class="btn btn-ghost btn-sm" onclick="copyTokenToClipboard()">
-                  📋 Copy
-                </button>
-                <button type="button" class="btn btn-danger-soft btn-sm" onclick="clearToken()">
-                  Clear
-                </button>
-              </div>
-            </div>
-
-            <div id="token-empty-state" class="empty-state">
-              <span>⚠️ No active token. Click a sign-in card above to mint a Keycloak JWT.</span>
-            </div>
-
-            <div id="token-active-state" class="hidden">
-              <div class="token-claims-summary">
-                <div class="claim-item">
-                  <span class="claim-label">Subject (sub)</span>
-                  <span class="claim-val" id="claim-sub">-</span>
-                </div>
-                <div class="claim-item">
-                  <span class="claim-label">Username</span>
-                  <span class="claim-val" id="claim-user">-</span>
-                </div>
-                <div class="claim-item">
-                  <span class="claim-label">Audience (aud)</span>
-                  <span class="claim-val" id="claim-aud">-</span>
-                </div>
-                <div class="claim-item">
-                  <span class="claim-label">Realm Roles</span>
-                  <span class="claim-val" id="claim-roles">-</span>
-                </div>
-                <div class="claim-item">
-                  <span class="claim-label">Expires In</span>
-                  <span class="claim-val text-green" id="claim-exp">-</span>
-                </div>
-              </div>
-
-              <!-- Collapsible Raw Decoded Claims -->
-              <details class="token-raw-details">
-                <summary>Inspect Complete Decoded JWT JSON</summary>
-                <pre class="code-pre text-xs" id="raw-jwt-json"></pre>
-              </details>
-            </div>
-          </div>
-        </div>
-
-        <!-- RIGHT COLUMN: ENDPOINT RUNNER & RESPONSE CONSOLE -->
-        <div class="col-right">
-          <!-- 1. Endpoint Runner -->
-          <div class="card">
-            <div class="card-header">
-              <h3>🚀 Resource API Test Bench (Port <code>:5000</code>)</h3>
-              <span class="badge badge-gray">Auto-injects Bearer Token</span>
-            </div>
-            <p class="text-muted text-sm" style="margin-bottom: 0.9rem;">
-              Click an endpoint to test how the Flask resource API enforces RS256 signature verification and Role-Based Access Control:
-            </p>
-
-            <div class="endpoints-list">
-              <!-- Endpoint 1: Public -->
-              <div class="endpoint-row">
-                <div class="endpoint-info">
-                  <span class="method-tag method-get">GET</span>
-                  <code class="endpoint-path">/api/public</code>
-                  <span class="endpoint-rule">Public (No Token Required)</span>
-                </div>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="callApi('/api/public', false)">
-                  Test ↗
-                </button>
-              </div>
-
-              <!-- Endpoint 2: /api/me -->
-              <div class="endpoint-row">
-                <div class="endpoint-info">
-                  <span class="method-tag method-get">GET</span>
-                  <code class="endpoint-path">/api/me</code>
-                  <span class="endpoint-rule">Protected (Any Valid Token)</span>
-                </div>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="callApi('/api/me')">
-                  Test ↗
-                </button>
-              </div>
-
-              <!-- Endpoint 3: /api/users -->
-              <div class="endpoint-row">
-                <div class="endpoint-info">
-                  <span class="method-tag method-get">GET</span>
-                  <code class="endpoint-path">/api/users</code>
-                  <span class="endpoint-rule">Requires Role: <code>viewer</code>, <code>developer</code>, or <code>admin</code></span>
-                </div>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="callApi('/api/users')">
-                  Test ↗
-                </button>
-              </div>
-
-              <!-- Endpoint 4: /api/admin/users -->
-              <div class="endpoint-row highlight-admin">
-                <div class="endpoint-info">
-                  <span class="method-tag method-get">GET</span>
-                  <code class="endpoint-path">/api/admin/users</code>
-                  <span class="endpoint-rule text-amber font-semibold">Strict Admin Only (Role: <code>admin</code>)</span>
-                </div>
-                <button type="button" class="btn btn-amber btn-sm" onclick="callApi('/api/admin/users')">
-                  Test ↗
-                </button>
-              </div>
-
-              <!-- Endpoint 5: /health -->
-              <div class="endpoint-row">
-                <div class="endpoint-info">
-                  <span class="method-tag method-get">GET</span>
-                  <code class="endpoint-path">/health</code>
-                  <span class="endpoint-rule">API Health Check</span>
-                </div>
-                <button type="button" class="btn btn-ghost btn-sm" onclick="callApi('/health', false)">
-                  Test ↗
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- 2. Live HTTP Response Console -->
-          <div class="card">
-            <div class="card-header">
-              <h3>📡 Live HTTP Response Console</h3>
-              <span id="response-status-badge" class="badge badge-gray">No request sent</span>
-            </div>
-
-            <div class="console-meta" id="console-meta">
-              <div><span>Target:</span> <code id="resp-target">-</code></div>
-              <div><span>Latency:</span> <span id="resp-time">-</span></div>
-            </div>
-
-            <pre class="code-pre" id="response-console-output">// Output will appear here when you test an endpoint above...</pre>
-          </div>
-        </div>
-      </div>
-    </section>
+    <div id="dashboard-toast" class="toast hidden"></div>
 
     <!-- ===================================================================
-         TAB 2: JWT ATTACK & EXPLOIT SIMULATOR
+         SUBTAB 1: PRIVILEGED WORKSPACES (READER, DEVELOPER, ADMIN)
          =================================================================== -->
-    <section id="tab-attacks" class="tab-content">
-      <div class="attack-intro-banner">
-        <div>
-          <h3>💥 Phase 2 Cryptographic Attack &amp; Defense Simulator</h3>
-          <p>
-            Test classic JWT exploits against the server. Watch the difference between a <strong>naive verifier</strong> (which trusts token headers blindly) and the <strong>hardened verifier</strong> (which enforces strict RS256 pinning and claim validation).
-          </p>
+    <div id="view-workspaces" class="subtab-content active">
+      <!-- ---------------------------------------------------------------
+           TIER 1: READER WORKSPACE (Always unlocked for authenticated users)
+           --------------------------------------------------------------- -->
+      <section class="workspace-section tier-reader-border">
+        <div class="workspace-header">
+          <div>
+            <div class="workspace-tag tag-reader">LEVEL 1 &bull; GENERAL WORKSPACE</div>
+            <h3>📖 Knowledge Base &amp; Organization Directory</h3>
+            <p class="text-sm text-muted">Accessible to all authenticated users (<code>User</code>, <code>Developer</code>, <code>Admin</code>) via <code>GET /api/users</code>.</p>
+          </div>
+          <span class="badge badge-green">🟢 Unlocked &bull; Read-Only</span>
         </div>
-        <button type="button" class="btn btn-primary" onclick="runAllAttackTests()">
-          ▶ Run All 5 Attack Tests
+
+        <div class="workspace-body">
+          <div class="grid-2-col-equal">
+            <!-- Left: Knowledge Base -->
+            <div class="sub-card">
+              <h4>📚 Architecture &amp; Security Knowledge Base</h4>
+              <div id="reader-kb-list" class="kb-list">
+                <div class="text-muted text-sm">Loading knowledge base from API...</div>
+              </div>
+            </div>
+
+            <!-- Right: Organization Directory -->
+            <div class="sub-card">
+              <h4>👥 Team Directory</h4>
+              <div class="table-responsive">
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Clearance</th>
+                      <th>Email</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="reader-directory-tbody">
+                    <tr><td colspan="4" class="text-muted text-center">Loading directory...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------------------------------------------------------
+           TIER 2: DEVELOPER WORKSPACE (Unlocked for Developer & Admin)
+           --------------------------------------------------------------- -->
+      <section id="tier-2-unlocked" class="workspace-section tier-developer-border hidden">
+        <div class="workspace-header">
+          <div>
+            <div class="workspace-tag tag-developer">LEVEL 2 &bull; DEVELOPER WORKSPACE</div>
+            <h3>🧑‍💻 Staging Runtime Config &amp; Feature Flags</h3>
+            <p class="text-sm text-muted">Accessible only to <code>Developer</code> and <code>Admin</code> roles via <code>GET /api/developer/config</code>.</p>
+          </div>
+          <span class="badge badge-blue">🔵 Unlocked &bull; Full Developer Privileges</span>
+        </div>
+
+        <div class="workspace-body">
+          <div class="grid-3-col">
+            <!-- Feature Flags -->
+            <div class="sub-card">
+              <h4>🚩 Runtime Feature Flags</h4>
+              <div id="dev-feature-flags" class="flags-list"></div>
+            </div>
+
+            <!-- Microservices Topology -->
+            <div class="sub-card">
+              <h4>🌐 Microservices Topology</h4>
+              <div id="dev-services-list" class="services-list"></div>
+            </div>
+
+            <!-- CI/CD Build Pipeline -->
+            <div class="sub-card">
+              <h4>🚀 Build &amp; Test Pipeline</h4>
+              <div id="dev-pipeline-box" class="pipeline-box"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tier 2 Locked State (Shown to Alice / Readers) -->
+      <section id="tier-2-locked" class="locked-card">
+        <div class="locked-content">
+          <div class="locked-icon">🔒</div>
+          <div>
+            <h4>Level 2: Developer Workspace is Restricted</h4>
+            <p class="text-sm text-muted">
+              Your current account (<code id="locked-dev-username">alice</code>) has <strong>Reader (<code>User / viewer</code>)</strong> privileges. Accessing developer configurations, feature flags, or staging pipelines requires the <code>Developer</code> or <code>Admin</code> role.
+            </p>
+          </div>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="quickLogin('drench', 'drench123')">
+          Switch to 🧑‍💻 drench (Developer) to Unlock &rarr;
         </button>
-      </div>
+      </section>
 
-      <div class="attacks-grid">
-        <!-- Attack Card 1: alg: none -->
-        <div class="attack-card" id="card-attack-none">
-          <div class="attack-card-header">
+      <!-- ---------------------------------------------------------------
+           TIER 3: ADMIN CONTROL CENTER (Unlocked ONLY for Admin)
+           --------------------------------------------------------------- -->
+      <section id="tier-3-unlocked" class="workspace-section tier-admin-border hidden">
+        <div class="workspace-header">
+          <div>
+            <div class="workspace-tag tag-admin">LEVEL 3 &bull; SECURITY &amp; GOVERNANCE</div>
+            <h3>🛡️ Administrative Security &amp; Audit Governance</h3>
+            <p class="text-sm text-muted">Strictly restricted to <code>Admin</code> accounts via <code>GET /api/admin/users</code>.</p>
+          </div>
+          <span class="badge badge-amber">🟡 Unlocked &bull; Full Administrator Control</span>
+        </div>
+
+        <div class="workspace-body">
+          <div class="grid-2-col-equal">
+            <!-- Security Audit Log -->
+            <div class="sub-card">
+              <h4>📜 Real-Time Security Audit Log</h4>
+              <div id="admin-audit-log" class="audit-log-list"></div>
+            </div>
+
+            <!-- Privileged Actions & Governance -->
+            <div class="sub-card">
+              <h4>⚙️ System Governance &amp; Privileged Actions</h4>
+              <div id="admin-governance-box" class="governance-box"></div>
+              <div class="admin-action-buttons">
+                <button type="button" class="btn btn-outline-amber btn-sm" onclick="triggerAdminAction('Key Rotation Check')">
+                  🔄 Run Key Rotation Verification
+                </button>
+                <button type="button" class="btn btn-outline-danger btn-sm" onclick="triggerAdminAction('Session Audit')">
+                  🚨 Audit Active Sessions
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tier 3 Locked State (Shown to Alice and Drench) -->
+      <section id="tier-3-locked" class="locked-card">
+        <div class="locked-content">
+          <div class="locked-icon">🔒</div>
+          <div>
+            <h4>Level 3: Administrator Control Center is Restricted</h4>
+            <p class="text-sm text-muted">
+              Security audit logs, master credentials governance, and platform controls are strictly reserved for <strong>Administrator (<code>Admin</code>)</strong> accounts.
+            </p>
+          </div>
+        </div>
+        <button type="button" class="btn btn-amber btn-sm" onclick="quickLogin('bob', 'bob123')">
+          Switch to 🛡️ bob (Admin) to Unlock &rarr;
+        </button>
+      </section>
+    </div>
+
+    <!-- ===================================================================
+         SUBTAB 2: JWT ATTACK SIMULATOR (AVAILABLE IN PORTAL)
+         =================================================================== -->
+    <div id="view-attacks" class="subtab-content">
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-header">
+          <div>
+            <h3>💥 Phase 2 Cryptographic Attack &amp; Defense Simulator</h3>
+            <p class="text-sm text-muted">Test how the API blocks classic JWT exploits using the current session.</p>
+          </div>
+          <button type="button" class="btn btn-primary btn-sm" onclick="runAllAttackTests()">
+            ▶ Run All Attack Tests
+          </button>
+        </div>
+
+        <div class="attacks-grid">
+          <!-- Attack 1: alg: none -->
+          <div class="attack-card">
             <div class="attack-badge">EXPLOIT 1</div>
             <h4>Signature Stripping (<code>alg: "none"</code>)</h4>
-          </div>
-          <p class="attack-desc">
-            An attacker crafts a token claiming <code>roles: ["admin"]</code> and changes the JOSE header to <code>{"alg": "none"}</code>, removing the signature entirely.
-          </p>
-
-          <div class="exploit-payload-box">
-            <code>{"alg": "none", "typ": "JWT"}.{"sub": "mallory", "roles": ["admin"]}.&lt;empty&gt;</code>
+            <p class="text-xs text-muted">Forges an admin token with empty signature.</p>
+            <button type="button" class="btn btn-outline-danger btn-sm btn-block" onclick="testAttackNone()">
+              Test "alg: none"
+            </button>
           </div>
 
-          <div class="attack-verdict" id="verdict-none">
-            <div class="verdict-item naive-fail">
-              <span>Naive Verifier:</span> <strong>💥 VULNERABLE</strong> (accepts unsigned token!)
-            </div>
-            <div class="verdict-item secure-pass">
-              <span>Secure Verifier:</span> <strong>🛡️ PROTECTED</strong> (pinned to RS256, rejects <code>none</code>)
-            </div>
-          </div>
-
-          <button type="button" class="btn btn-outline-danger btn-block" onclick="testAttackNone()">
-            ⚡ Test "alg: none" Exploit Live
-          </button>
-        </div>
-
-        <!-- Attack Card 2: HS256 Key Confusion -->
-        <div class="attack-card" id="card-attack-hs256">
-          <div class="attack-card-header">
+          <!-- Attack 2: HS256 Key Confusion -->
+          <div class="attack-card">
             <div class="attack-badge">EXPLOIT 2 (CVE-2015-9235)</div>
-            <h4>RSA Public Key Confusion (<code>alg: "HS256"</code>)</h4>
-          </div>
-          <p class="attack-desc">
-            The attacker fetches the server's <strong>public key PEM</strong> from JWKS, crafts a token with <code>alg: "HS256"</code>, and signs it using the public key as the HMAC secret!
-          </p>
-
-          <div class="exploit-payload-box">
-            <code>HMAC-SHA256(header.payload, secret = Server_Public_RSA_PEM)</code>
+            <h4>Public Key Confusion (<code>alg: "HS256"</code>)</h4>
+            <p class="text-xs text-muted">Signs HMAC using server's RSA public PEM key.</p>
+            <button type="button" class="btn btn-outline-danger btn-sm btn-block" onclick="testAttackKeyConfusion()">
+              Test Key Confusion
+            </button>
           </div>
 
-          <div class="attack-verdict" id="verdict-hs256">
-            <div class="verdict-item naive-fail">
-              <span>Naive Verifier:</span> <strong>💥 VULNERABLE</strong> (treats public key as HMAC secret!)
-            </div>
-            <div class="verdict-item secure-pass">
-              <span>Secure Verifier:</span> <strong>🛡️ PROTECTED</strong> (rejects HMAC on RS256 endpoint)
-            </div>
-          </div>
-
-          <button type="button" class="btn btn-outline-danger btn-block" onclick="testAttackKeyConfusion()">
-            ⚡ Test Key Confusion Exploit Live
-          </button>
-        </div>
-
-        <!-- Attack Card 3: Payload Tampering -->
-        <div class="attack-card" id="card-attack-tamper">
-          <div class="attack-card-header">
+          <!-- Attack 3: Payload Tamper -->
+          <div class="attack-card">
             <div class="attack-badge">EXPLOIT 3</div>
             <h4>Payload Claim Tampering</h4>
-          </div>
-          <p class="attack-desc">
-            Takes Alice's legitimate token (<code>roles: ["User"]</code>) and manually edits the payload base64 to <code>roles: ["admin"]</code> without re-signing.
-          </p>
-
-          <div class="exploit-payload-box">
-            <code>Original_Header.Base64({"roles": ["admin"]}).Original_Signature</code>
+            <p class="text-xs text-muted">Alters payload base64 to <code>roles: ["admin"]</code> without re-signing.</p>
+            <button type="button" class="btn btn-outline-danger btn-sm btn-block" onclick="testAttackTamper()">
+              Test Tampering
+            </button>
           </div>
 
-          <div class="attack-verdict" id="verdict-tamper">
-            <div class="verdict-item secure-pass">
-              <span>Secure Verifier:</span> <strong>🛡️ PROTECTED</strong> (<code>InvalidSignatureError</code>)
-            </div>
-          </div>
-
-          <button type="button" class="btn btn-outline-danger btn-block" onclick="testAttackTamper()">
-            ⚡ Test Payload Tampering Live
-          </button>
-        </div>
-
-        <!-- Attack Card 4: Expired Token Replay -->
-        <div class="attack-card" id="card-attack-replay">
-          <div class="attack-card-header">
+          <!-- Attack 4: Expired Token -->
+          <div class="attack-card">
             <div class="attack-badge">EXPLOIT 4</div>
             <h4>Expired Token Replay</h4>
+            <p class="text-xs text-muted">Replays an expired token timestamp to test <code>exp</code> enforcement.</p>
+            <button type="button" class="btn btn-outline-danger btn-sm btn-block" onclick="testAttackExpired()">
+              Test Expired Token
+            </button>
           </div>
-          <p class="attack-desc">
-            An attacker intercepts an old token whose expiration timestamp (<code>exp</code>) is in the past and attempts to reuse it.
-          </p>
+        </div>
 
-          <div class="exploit-payload-box">
-            <code>payload.exp = now - 3600 (Expired 1 hour ago)</code>
+        <!-- Attack Output Console -->
+        <div style="margin-top: 1.25rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.5rem;">
+            <strong class="text-xs text-muted">SIMULATION EXECUTION LOG:</strong>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="clearAttackConsole()">Clear</button>
           </div>
-
-          <div class="attack-verdict" id="verdict-replay">
-            <div class="verdict-item secure-pass">
-              <span>Secure Verifier:</span> <strong>🛡️ PROTECTED</strong> (<code>token_expired</code> / 401)
-            </div>
-          </div>
-
-          <button type="button" class="btn btn-outline-danger btn-block" onclick="testAttackExpired()">
-            ⚡ Test Expired Token Live
-          </button>
+          <pre class="code-pre" id="attack-console-log">// Click any attack test above to see cryptographic execution...</pre>
         </div>
       </div>
-
-      <!-- Attack Test Console -->
-      <div class="card" style="margin-top: 1.5rem;">
-        <div class="card-header">
-          <h3>🖥️ Attack Simulation Live Output</h3>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="clearAttackConsole()">Clear</button>
-        </div>
-        <pre class="code-pre" id="attack-console-log">// Click any attack test above to see the cryptographic execution log...</pre>
-      </div>
-    </section>
+    </div>
 
     <!-- ===================================================================
-         TAB 3: LIVE JWKS & KEY INSPECTOR
+         SUBTAB 3: LIVE JWKS EXPLORER
          =================================================================== -->
-    <section id="tab-jwks" class="tab-content">
+    <div id="view-jwks" class="subtab-content">
       <div class="card">
         <div class="card-header">
           <div>
-            <h3>🔑 Live JSON Web Key Set (JWKS) Inspector</h3>
-            <p class="text-muted text-sm">
-              Fetched in real-time from Keycloak: <code>http://localhost:8080/realms/Authlab/protocol/openid-connect/certs</code>
-            </p>
+            <h3>🔑 Keycloak Live JWKS (JSON Web Key Set)</h3>
+            <p class="text-sm text-muted">Public keys currently published by Keycloak realm <code>Authlab</code>.</p>
           </div>
           <button type="button" class="btn btn-secondary btn-sm" onclick="fetchLiveJwks()">
-            🔄 Refresh Keys
+            🔄 Refresh
           </button>
         </div>
-
-        <div id="jwks-keys-container" class="jwks-grid">
-          <!-- Populated by JS -->
-        </div>
-
-        <div class="card-footer-note">
-          <strong>🔒 Security Guarantee:</strong> The JWKS publishes the public modulus (<code>n</code>) and public exponent (<code>e</code>) only. The private key (<code>d</code>) is never exposed, allowing anyone to verify signatures while only the issuer can sign.
-        </div>
+        <div id="jwks-keys-container" class="jwks-grid"></div>
       </div>
-    </section>
+    </div>
   </main>
+
+  <!-- =====================================================================
+       MODAL: ACTIVE JWT TOKEN INSPECTOR
+       ===================================================================== -->
+  <div id="token-modal" class="modal-backdrop hidden" onclick="if(event.target===this) toggleTokenModal()">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>🔑 Active Keycloak RS256 JWT Token</h3>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="toggleTokenModal()">✕ Close</button>
+      </div>
+      <div class="modal-body">
+        <div class="token-claims-summary">
+          <div class="claim-item">
+            <span class="claim-label">Subject (sub)</span>
+            <span class="claim-val" id="modal-claim-sub">-</span>
+          </div>
+          <div class="claim-item">
+            <span class="claim-label">Username</span>
+            <span class="claim-val" id="modal-claim-user">-</span>
+          </div>
+          <div class="claim-item">
+            <span class="claim-label">Audience (aud)</span>
+            <span class="claim-val" id="modal-claim-aud">-</span>
+          </div>
+          <div class="claim-item">
+            <span class="claim-label">Realm Roles</span>
+            <span class="claim-val" id="modal-claim-roles">-</span>
+          </div>
+          <div class="claim-item">
+            <span class="claim-label">Time Remaining</span>
+            <span class="claim-val text-green" id="modal-claim-exp">-</span>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin: 0.85rem 0 0.4rem;">
+          <label class="text-xs font-semibold text-muted">Complete Decoded JSON</label>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="copyTokenToClipboard()">
+            📋 Copy Raw Token
+          </button>
+        </div>
+        <pre class="code-pre" id="modal-raw-json"></pre>
+      </div>
+    </div>
+  </div>
 
   <script src="app.js"></script>
 </body>
 </html>
-

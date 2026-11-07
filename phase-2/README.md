@@ -51,20 +51,33 @@ docker compose up -d --build
 
 ## 🖥️ What You Can Test in the Web UI (`:3000`)
 
-### 1. 🔐 Keycloak RBAC Test Bench Tab
-- **1-Click Quick Sign-In**:
-  - 👩‍💻 **`alice`** (`alice123`) &rarr; Role: `User` / `viewer`
-  - 🛡️ **`bob`** (`bob123`) &rarr; Role: `Admin` / `admin`
-  - 🧑‍💻 **`drench`** (`drench123`) &rarr; Role: `Developer`
-- **Active Token Inspector**:
-  - Visual display of Subject UUID (`sub`), Username, Audience (`aud`), Realm Roles, and Live Expiration countdown.
-  - Complete raw decoded JSON inspector and 1-click **📋 Copy Token** button.
-- **Interactive Endpoint Runner**:
-  - `GET /api/public` &rarr; 🟢 **`200 OK`** (Unauthenticated)
-  - `GET /api/me` &rarr; 🔵 **`200 OK`** (Profile with verified claims)
-  - `GET /api/users` &rarr; 🟣 **`200 OK`** (Allowed for all users)
-  - `GET /api/admin/users` &rarr; 🔴 **`403 Forbidden`** for Alice, 🟢 **`200 OK`** for Bob!
-- **Live Response Console**: Shows status code badges, roundtrip latency (ms), and formatted JSON.
+### 1. 🔐 Privilege-Based Landing & Authentication Flow
+- **Unauthenticated Login Page Gate**:
+  - The UI starts on a clean, dedicated Login Page (no protected content or tabs visible before signing in).
+  - Authenticates directly against Keycloak realm `Authlab` via client `authlab-web` using the OIDC Resource Owner Password Credentials (ROPC) grant.
+  - 1-Click Quick Demo Sign-In buttons:
+    - 📖 **`alice`** (`alice123`) &rarr; Role: `User` (Reader Clearance)
+    - 🧑‍💻 **`drench`** (`drench123`) &rarr; Role: `Developer` (Developer Clearance)
+    - 🛡️ **`bob`** (`bob123`) &rarr; Role: `Admin` (Administrator Clearance)
+
+### 2. 🏛️ Dynamic Privilege-Based Workspaces
+Once logged in, the dashboard dynamically unlocks workspace tiers according to the user's Keycloak realm roles:
+- **Level 1: Reader Workspace (Unlocked for Alice, Drench, and Bob)**:
+  - Accessible via `GET /api/users`.
+  - Displays company directory and architecture knowledge base in strict read-only mode.
+- **Level 2: Developer Workspace (Unlocked for Drench and Bob; Locked for Alice)**:
+  - Accessible via `GET /api/developer/config`.
+  - Displays runtime feature flags, microservice topology, and CI/CD build metrics.
+  - Locked card placeholder is shown for Alice with an inline switch button to test privilege elevation.
+- **Level 3: Administrator Security Control Center (Unlocked ONLY for Bob)**:
+  - Accessible via `GET /api/admin/users`.
+  - Displays real-time security audit logs, token algorithm and TTL governance, and Keycloak JWKS rotation controls.
+  - Locked card placeholder is shown for Alice and Drench with quick switch to Bob.
+
+### 3. 🔑 Active Token Inspector Modal & User Switcher
+- **Hero Privilege Banner**: Shows active clearance badge, visual tier status indicators (Unlocked vs Locked), and 1-click user switcher buttons.
+- **Token Inspector Modal**: Click **Inspect Token** in the top navigation to view decoded JWT claims (`sub`, `iss`, `aud`, `exp`, `realm_access.roles`) and copy the raw Bearer token.
+- **Sign Out**: One-click session termination that clears tokens and returns to the Login Page.
 
 ---
 

@@ -1,5 +1,6 @@
 /**
- * AuthLab Phase 2 — Interactive Testing Suite Controller
+ * AuthLab Phase 2 — Privilege-Based Portal Controller
+ * Integrates with Keycloak (Realm: Authlab) and Resource API (:5000)
  */
 
 const CONFIG = {
@@ -26,34 +27,23 @@ function escapeHtml(str) {
 }
 
 function showToast(msg) {
-  const toast = document.getElementById('global-toast');
+  const toast = document.getElementById('global-toast') || document.getElementById('dashboard-toast');
   if (!toast) return;
   toast.innerHTML = msg;
   toast.classList.remove('hidden');
-  setTimeout(() => toast.classList.add('hidden'), 4000);
-}
-
-function switchTab(tabId) {
-  document.querySelectorAll('.tab-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.tab === tabId);
-  });
-  document.querySelectorAll('.tab-content').forEach(c => {
-    c.classList.toggle('active', c.id === tabId);
-  });
-  if (tabId === 'tab-jwks' && !STATE.jwks) {
-    fetchLiveJwks();
-  }
+  setTimeout(() => toast.classList.add('hidden'), 4500);
 }
 
 // ============================================================================
-// TOKEN DECODING & PARSING
+// TOKEN PARSING & DECODING
 // ============================================================================
 
 function decodeJwt(jwtStr) {
   try {
     const parts = jwtStr.split('.');
     if (parts.length < 2) return null;
-    const b64 = (s) => atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4));
+    const b64 = (s) =>
+      atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4));
     return {
       header: JSON.parse(b64(parts[0])),
       payload: JSON.parse(b64(parts[1])),
@@ -63,211 +53,470 @@ function decodeJwt(jwtStr) {
   }
 }
 
-function setSessionToken(tokenStr) {
-  STATE.token = tokenStr;
-  sessionStorage.setItem('phase2_token', tokenStr);
-  const parsed = decodeJwt(tokenStr);
-  if (parsed) {
-    STATE.header = parsed.header;
-    STATE.claims = parsed.payload;
-    STATE.currentUser = parsed.payload.preferred_username || 'user';
-  } else {
-    STATE.header = null;
-    STATE.claims = null;
-    STATE.currentUser = null;
-  }
-  updateTokenDisplay();
-}
-
-function clearToken() {
-  STATE.token = null;
-  STATE.header = null;
-  STATE.claims = null;
-  STATE.currentUser = null;
-  sessionStorage.removeItem('phase2_token');
-  updateTokenDisplay();
-  showToast('ℹ️ Active token cleared.');
-}
-
-function logout() {
-  clearToken();
-  showToast('👋 Signed out of Keycloak session.');
-}
-
-function updateTokenDisplay() {
-  const emptyState = document.getElementById('token-empty-state');
-  const activeState = document.getElementById('token-active-state');
-  const navUser = document.getElementById('nav-user-controls');
-
-  if (!STATE.token || !STATE.claims) {
-    emptyState.classList.remove('hidden');
-    activeState.classList.add('hidden');
-    navUser.classList.add('hidden');
-    return;
-  }
-
-  emptyState.classList.add('hidden');
-  activeState.classList.remove('hidden');
-  navUser.classList.remove('hidden');
-
-  const c = STATE.claims;
-  const roles = c.realm_access?.roles || [];
-  const primaryRole = roles.includes('Admin') || roles.includes('admin')
-    ? 'Admin'
-    : roles.includes('Developer') || roles.includes('developer')
-    ? 'Developer'
-    : 'User / viewer';
-
-  document.getElementById('claim-sub').textContent = (c.sub || '').slice(0, 16) + '...';
-  document.getElementById('claim-user').textContent = c.preferred_username || 'unknown';
-  document.getElementById('claim-aud').textContent = Array.isArray(c.aud) ? c.aud.join(', ') : c.aud || '-';
-
-  // Role badges
-  document.getElementById('claim-roles').innerHTML = roles
-    .filter(r => !['default-roles-authlab', 'offline_access', 'uma_authorization'].includes(r))
-    .map(r => `<span class="badge ${r.toLowerCase().includes('admin') ? 'badge-amber' : 'badge-blue'}">${escapeHtml(r)}</span>`)
-    .join(' ') || '<span class="text-muted">None</span>';
-
-  // Expiration calculation
-  const expSec = Math.max(0, (c.exp || 0) - Math.floor(Date.now() / 1000));
-  document.getElementById('claim-exp').textContent = `${expSec}s remaining`;
-
-  // Raw JSON
-  document.getElementById('raw-jwt-json').textContent = JSON.stringify({
-    header: STATE.header,
-    payload: STATE.claims,
-  }, null, 2);
-
-  // Nav user chip
-  document.getElementById('nav-user-name').textContent = c.preferred_username || 'user';
-  document.getElementById('nav-user-role').textContent = `Role: ${primaryRole}`;
-}
-
-function copyTokenToClipboard() {
-  if (!STATE.token) return;
-  navigator.clipboard.writeText(STATE.token);
-  showToast('📋 Copied raw Bearer token to clipboard!');
+function isTokenExpired(claims) {
+  if (!claims || !claims.exp) return true;
+  return claims.exp < Math.floor(Date.now() / 1000);
 }
 
 // ============================================================================
-// KEYCLOAK AUTHENTICATION
+// KEYCLOAK HEALTH CHECK
 // ============================================================================
-
-async function authenticateWithKeycloak(username, password) {
-  const tokenUrl = `${CONFIG.keycloakUrl}/realms/${CONFIG.realm}/protocol/openid-connect/token`;
-  const body = new URLSearchParams({
-    grant_type: 'password',
-    client_id: CONFIG.clientId,
-    username: username.trim(),
-    password,
-  });
-
-  const resp = await fetch(tokenUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  });
-
-  const data = await resp.json().catch(() => ({}));
-  if (!resp.ok) {
-    throw new Error(data.error_description || data.error || `HTTP ${resp.status}`);
-  }
-
-  setSessionToken(data.access_token);
-  showToast(`🎉 Authenticated as <strong>${escapeHtml(username)}</strong>! Token loaded into test bench.`);
-}
-
-async function quickLogin(username, password) {
-  try {
-    await authenticateWithKeycloak(username, password);
-  } catch (err) {
-    showToast(`❌ Authentication failed: ${escapeHtml(err.message)}`);
-  }
-}
-
-async function handleManualLogin(e) {
-  e.preventDefault();
-  const u = document.getElementById('custom-user').value;
-  const p = document.getElementById('custom-pw').value;
-  try {
-    await authenticateWithKeycloak(u, p);
-  } catch (err) {
-    showToast(`❌ Login failed: ${escapeHtml(err.message)}`);
-  }
-}
 
 async function checkKeycloakStatus() {
+  const statusPill = document.getElementById('kc-status-pill');
   const statusEl = document.getElementById('kc-status-text');
   try {
     const res = await fetch(`${CONFIG.keycloakUrl}/realms/${CONFIG.realm}/protocol/openid-connect/certs`);
     if (res.ok) {
       statusEl.textContent = `Keycloak Online (${CONFIG.realm})`;
+      statusPill.style.background = 'rgba(16, 185, 129, 0.12)';
+      statusPill.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+      statusPill.querySelector('.status-dot').style.background = '#10b981';
     } else {
       statusEl.textContent = 'Keycloak: Realm Check Failed';
     }
   } catch {
-    statusEl.textContent = 'Keycloak: Offline / Connecting...';
+    statusEl.textContent = 'Keycloak: Connecting...';
   }
 }
 
 // ============================================================================
-// RESOURCE API TEST RUNNER
+// VIEW SWITCHING (LOGIN VS DASHBOARD)
 // ============================================================================
 
-async function callApi(path, includeToken = true) {
-  const url = `${CONFIG.apiUrl}${path}`;
-  const respConsole = document.getElementById('response-console-output');
-  const badge = document.getElementById('response-status-badge');
-  const targetEl = document.getElementById('resp-target');
-  const timeEl = document.getElementById('resp-time');
+function showAuthView() {
+  document.getElementById('auth-view').classList.remove('hidden');
+  document.getElementById('dashboard-view').classList.add('hidden');
+  document.getElementById('nav-user-controls').classList.add('hidden');
+}
 
-  targetEl.textContent = `${url} ${includeToken && STATE.token ? '(with Bearer token)' : '(no token)'}`;
-  badge.className = 'badge badge-gray';
-  badge.textContent = 'Calling...';
+function showDashboardView() {
+  document.getElementById('auth-view').classList.add('hidden');
+  document.getElementById('dashboard-view').classList.remove('hidden');
+  document.getElementById('nav-user-controls').classList.remove('hidden');
+}
 
-  const headers = {};
-  if (includeToken && STATE.token) {
-    headers['Authorization'] = `Bearer ${STATE.token}`;
+// ============================================================================
+// AUTHENTICATION LOGIC
+// ============================================================================
+
+async function login(username, password) {
+  const submitBtn = document.getElementById('login-submit-btn');
+  const alertEl = document.getElementById('login-alert');
+  
+  if (alertEl) {
+    alertEl.classList.add('hidden');
+    alertEl.textContent = '';
   }
 
-  const startTime = performance.now();
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Authenticating against Keycloak...';
+  }
+
+  const tokenUrl = `${CONFIG.keycloakUrl}/realms/${CONFIG.realm}/protocol/openid-connect/token`;
+  const body = new URLSearchParams({
+    grant_type: 'password',
+    client_id: CONFIG.clientId,
+    username: username.trim(),
+    password: password,
+  });
+
   try {
-    const resp = await fetch(url, { method: 'GET', headers });
-    const latency = Math.round(performance.now() - startTime);
-    timeEl.textContent = `${latency}ms`;
+    const resp = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
 
-    const raw = await resp.text();
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      parsed = raw;
+    const data = await resp.json().catch(() => ({}));
+
+    if (!resp.ok) {
+      const errMsg = data.error_description || data.error || `HTTP ${resp.status}`;
+      throw new Error(errMsg);
     }
 
-    if (resp.status >= 200 && resp.status < 300) {
-      badge.className = 'badge badge-green';
-      badge.textContent = `${resp.status} OK`;
-    } else if (resp.status === 401) {
-      badge.className = 'badge badge-amber';
-      badge.textContent = '401 Unauthorized';
-    } else if (resp.status === 403) {
-      badge.className = 'badge badge-red';
-      badge.textContent = '403 Forbidden';
-    } else {
-      badge.className = 'badge badge-red';
-      badge.textContent = `HTTP ${resp.status}`;
+    const token = data.access_token;
+    const parsed = decodeJwt(token);
+
+    if (!parsed) {
+      throw new Error('Received unparseable JWT access token from Keycloak.');
     }
 
-    respConsole.textContent = typeof parsed === 'object' ? JSON.stringify(parsed, null, 2) : parsed;
+    // Save token to session
+    STATE.token = token;
+    STATE.header = parsed.header;
+    STATE.claims = parsed.payload;
+    STATE.currentUser = parsed.payload.preferred_username || username;
+    sessionStorage.setItem('phase2_token', token);
+
+    // Switch view to dashboard & load privileged tiers
+    showDashboardView();
+    await loadDashboardData();
+    showToast(`🎉 Welcome back, <strong>${escapeHtml(STATE.currentUser)}</strong>! Workspace privileges updated.`);
+
   } catch (err) {
-    badge.className = 'badge badge-red';
-    badge.textContent = 'Network Error';
-    respConsole.textContent = `Error connecting to ${url}:\n${err.message}\n(Ensure phase-2-api is running on port 5000)`;
+    if (alertEl) {
+      alertEl.innerHTML = `⚠️ <strong>Authentication Failed:</strong> ${escapeHtml(err.message)}`;
+      alertEl.classList.remove('hidden');
+    } else {
+      alert(`Login failed: ${err.message}`);
+    }
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Sign In with Keycloak';
+    }
+  }
+}
+
+async function handleFormLogin(event) {
+  if (event) event.preventDefault();
+  const u = document.getElementById('input-username').value;
+  const p = document.getElementById('input-password').value;
+  if (!u || !p) return;
+  await login(u, p);
+}
+
+async function quickLogin(username, password) {
+  document.getElementById('input-username').value = username;
+  document.getElementById('input-password').value = password;
+  await login(username, password);
+}
+
+function logout() {
+  STATE.token = null;
+  STATE.claims = null;
+  STATE.header = null;
+  STATE.currentUser = null;
+  sessionStorage.removeItem('phase2_token');
+  showAuthView();
+  showToast('👋 You have signed out of your Keycloak session.');
+}
+
+// ============================================================================
+// PRIVILEGE-BASED DASHBOARD LOADER
+// ============================================================================
+
+async function loadDashboardData() {
+  if (!STATE.claims) return;
+
+  const c = STATE.claims;
+  const rawRoles = c.realm_access?.roles || [];
+  const rolesLower = rawRoles.map(r => r.toLowerCase());
+
+  const isAdmin = rolesLower.includes('admin');
+  const isDeveloper = rolesLower.includes('developer');
+  const isReader = !isAdmin && !isDeveloper;
+
+  let primaryRoleTitle = 'Reader (Level 1)';
+  let userIcon = '📖';
+
+  if (isAdmin) {
+    primaryRoleTitle = 'Administrator (Level 3)';
+    userIcon = '🛡️';
+  } else if (isDeveloper) {
+    primaryRoleTitle = 'Developer (Level 2)';
+    userIcon = '🧑‍💻';
+  }
+
+  // 1. Update Topbar
+  document.getElementById('nav-user-icon').textContent = userIcon;
+  document.getElementById('nav-user-name').textContent = c.preferred_username || 'User';
+  document.getElementById('nav-user-role').textContent = primaryRoleTitle;
+
+  // 2. Update Hero Privilege Banner
+  const displayName = c.name || c.preferred_username || 'User';
+  document.getElementById('hero-title').textContent = `Welcome, ${displayName}!`;
+  
+  if (isAdmin) {
+    document.getElementById('hero-desc').innerHTML =
+      `You are authenticated with <strong>Administrator (Level 3)</strong> clearance. You have unhindered access to <strong>all 3 privilege tiers</strong>, including system security governance and audit logs.`;
+  } else if (isDeveloper) {
+    document.getElementById('hero-desc').innerHTML =
+      `You are authenticated with <strong>Developer (Level 2)</strong> clearance. You have access to Tier 1 and Tier 2 (staging configs, microservice topology, and feature flags). Tier 3 is restricted to Admins.`;
+  } else {
+    document.getElementById('hero-desc').innerHTML =
+      `You are authenticated with <strong>Reader (Level 1)</strong> clearance. You have access to Tier 1 (Knowledge Base &amp; Organization Directory). Developer and Admin tiers are locked.`;
+  }
+
+  // 3. Update Visual Privilege Status Pills
+  const pillT1 = document.getElementById('pill-tier-1');
+  const pillT2 = document.getElementById('pill-tier-2');
+  const pillT3 = document.getElementById('pill-tier-3');
+
+  // Tier 1 is always unlocked for authenticated users
+  pillT1.className = 'status-pill-item unlocked';
+  pillT1.innerHTML = '<span class="pill-dot"></span> Tier 1: Reader (Unlocked)';
+
+  // Tier 2 (Developer & Admin)
+  if (isDeveloper || isAdmin) {
+    pillT2.className = 'status-pill-item unlocked';
+    pillT2.innerHTML = '<span class="pill-dot"></span> Tier 2: Developer (Unlocked)';
+  } else {
+    pillT2.className = 'status-pill-item locked';
+    pillT2.innerHTML = '<span class="pill-dot"></span> Tier 2: Developer (Locked)';
+  }
+
+  // Tier 3 (Admin ONLY)
+  if (isAdmin) {
+    pillT3.className = 'status-pill-item unlocked';
+    pillT3.innerHTML = '<span class="pill-dot"></span> Tier 3: Admin (Unlocked)';
+  } else {
+    pillT3.className = 'status-pill-item locked';
+    pillT3.innerHTML = '<span class="pill-dot"></span> Tier 3: Admin (Locked)';
+  }
+
+  // 4. Fetch Tier 1: General Workspace (GET /api/users)
+  await loadTier1Data();
+
+  // 5. Render Tier 2: Developer Workspace
+  if (isDeveloper || isAdmin) {
+    document.getElementById('tier-2-unlocked').classList.remove('hidden');
+    document.getElementById('tier-2-locked').classList.add('hidden');
+    await loadTier2Data();
+  } else {
+    document.getElementById('tier-2-unlocked').classList.add('hidden');
+    document.getElementById('tier-2-locked').classList.remove('hidden');
+    document.getElementById('locked-dev-username').textContent = c.preferred_username || 'alice';
+  }
+
+  // 6. Render Tier 3: Admin Control Center
+  if (isAdmin) {
+    document.getElementById('tier-3-unlocked').classList.remove('hidden');
+    document.getElementById('tier-3-locked').classList.add('hidden');
+    await loadTier3Data();
+  } else {
+    document.getElementById('tier-3-unlocked').classList.add('hidden');
+    document.getElementById('tier-3-locked').classList.remove('hidden');
+  }
+}
+
+// Tier 1 Fetcher
+async function loadTier1Data() {
+  const kbContainer = document.getElementById('reader-kb-list');
+  const dirContainer = document.getElementById('reader-directory-tbody');
+
+  try {
+    const resp = await fetch(`${CONFIG.apiUrl}/api/users`, {
+      headers: { Authorization: `Bearer ${STATE.token}` },
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    // Populate Knowledge Base
+    kbContainer.innerHTML = (data.knowledge_base || []).map(kb => `
+      <div class="kb-item">
+        <div>
+          <div class="kb-title">${escapeHtml(kb.title)}</div>
+          <div class="kb-meta">ID: <code>${escapeHtml(kb.id)}</code> &bull; ${escapeHtml(kb.category)} &bull; Updated: ${escapeHtml(kb.updated)}</div>
+        </div>
+        <span class="badge badge-blue">${escapeHtml(kb.version)}</span>
+      </div>
+    `).join('');
+
+    // Populate Directory Table
+    dirContainer.innerHTML = (data.directory || []).map(u => `
+      <tr>
+        <td>
+          <strong>${escapeHtml(u.name)}</strong>
+          <span class="text-xs text-muted">(@${escapeHtml(u.username)})</span>
+        </td>
+        <td><span class="badge badge-purple">${escapeHtml(u.clearance)}</span></td>
+        <td><code>${escapeHtml(u.email)}</code></td>
+        <td><span class="badge badge-green">${escapeHtml(u.status)}</span></td>
+      </tr>
+    `).join('');
+
+  } catch (err) {
+    kbContainer.innerHTML = `<div class="text-danger">Failed to load Knowledge Base: ${escapeHtml(err.message)}</div>`;
+    dirContainer.innerHTML = `<tr><td colspan="4" class="text-danger text-center">Failed to load directory.</td></tr>`;
+  }
+}
+
+// Tier 2 Fetcher (Developer Config)
+async function loadTier2Data() {
+  const flagsEl = document.getElementById('dev-feature-flags');
+  const servicesEl = document.getElementById('dev-services-list');
+  const pipelineEl = document.getElementById('dev-pipeline-box');
+
+  try {
+    const resp = await fetch(`${CONFIG.apiUrl}/api/developer/config`, {
+      headers: { Authorization: `Bearer ${STATE.token}` },
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    // Feature Flags
+    flagsEl.innerHTML = Object.entries(data.feature_flags || {}).map(([flag, val]) => `
+      <div class="flag-item">
+        <span>${escapeHtml(flag)}</span>
+        <span class="badge ${val ? 'badge-green' : 'badge-gray'}">${val ? 'ENABLED' : 'DISABLED'}</span>
+      </div>
+    `).join('');
+
+    // Microservices
+    servicesEl.innerHTML = (data.services_topology || []).map(svc => `
+      <div class="service-item">
+        <div>
+          <strong>${escapeHtml(svc.name)}</strong>
+          <div class="text-xs text-muted">${escapeHtml(svc.host)} &bull; ${escapeHtml(svc.protocol)}</div>
+        </div>
+        <span class="badge badge-green">${escapeHtml(svc.status)}</span>
+      </div>
+    `).join('');
+
+    // Build Pipeline
+    const p = data.build_pipeline || {};
+    pipelineEl.innerHTML = `
+      <div class="pipeline-metric">
+        <span class="text-muted">Target Branch:</span>
+        <code>${escapeHtml(p.branch)}</code>
+      </div>
+      <div class="pipeline-metric">
+        <span class="text-muted">Last Commit:</span>
+        <code>${escapeHtml(p.last_commit)}</code>
+      </div>
+      <div class="pipeline-metric">
+        <span class="text-muted">Automated Tests:</span>
+        <span class="badge badge-green">${escapeHtml(p.tests_passed)} / ${escapeHtml(p.tests_passed)} Passed</span>
+      </div>
+      <div class="pipeline-metric">
+        <span class="text-muted">Code Coverage:</span>
+        <strong class="text-green">${escapeHtml(p.code_coverage)}</strong>
+      </div>
+    `;
+
+  } catch (err) {
+    flagsEl.innerHTML = `<div class="text-danger">Failed to load: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+// Tier 3 Fetcher (Admin Security Center)
+async function loadTier3Data() {
+  const auditEl = document.getElementById('admin-audit-log');
+  const govEl = document.getElementById('admin-governance-box');
+
+  try {
+    const resp = await fetch(`${CONFIG.apiUrl}/api/admin/users`, {
+      headers: { Authorization: `Bearer ${STATE.token}` },
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    // Audit Log
+    auditEl.innerHTML = (data.security_audit_log || []).map(log => `
+      <div class="audit-log-row">
+        <div>
+          <code>${escapeHtml(log.id)}</code> &bull; <strong>${escapeHtml(log.action)}</strong>
+          <div class="text-xs text-muted">Actor: ${escapeHtml(log.actor)} &bull; ${escapeHtml(log.timestamp)}</div>
+        </div>
+        <span class="badge ${log.status.includes('SUCCESS') || log.status.includes('VERIFIED') ? 'badge-green' : 'badge-red'}">
+          ${escapeHtml(log.status)}
+        </span>
+      </div>
+    `).join('');
+
+    // System Governance
+    const g = data.system_governance || {};
+    govEl.innerHTML = `
+      <div class="governance-item">
+        <span>Token Algorithm</span>
+        <strong>${escapeHtml(g.token_algorithm)}</strong>
+      </div>
+      <div class="governance-item">
+        <span>Token TTL</span>
+        <strong>${escapeHtml(g.token_ttl_seconds)} seconds</strong>
+      </div>
+      <div class="governance-item">
+        <span>Active JWKS Keys</span>
+        <strong>${escapeHtml(g.jwks_active_keys)} Keys Published</strong>
+      </div>
+      <div class="governance-item">
+        <span>Zero-Trust Policy</span>
+        <strong class="text-green">Strict Enforced</strong>
+      </div>
+    `;
+
+  } catch (err) {
+    auditEl.innerHTML = `<div class="text-danger">Access Denied: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+function triggerAdminAction(actionName) {
+  showToast(`⚙️ <strong>Admin Action Executed:</strong> ${escapeHtml(actionName)} verified successfully against Keycloak realm policy.`);
+}
+
+// ============================================================================
+// SUBTABS (WORKSPACES, ATTACKS, JWKS)
+// ============================================================================
+
+function switchSubTab(subtabId) {
+  document.querySelectorAll('.subnav-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.subtab === subtabId);
+  });
+  document.querySelectorAll('.subtab-content').forEach(c => {
+    c.classList.toggle('active', c.id === subtabId);
+  });
+  if (subtabId === 'view-jwks' && !STATE.jwks) {
+    fetchLiveJwks();
   }
 }
 
 // ============================================================================
-// TAB 2: JWT ATTACK SIMULATIONS
+// ACTIVE JWT TOKEN INSPECTOR MODAL
+// ============================================================================
+
+function toggleTokenModal() {
+  const modal = document.getElementById('token-modal');
+  const isHidden = modal.classList.toggle('hidden');
+
+  if (!isHidden && STATE.claims) {
+    const c = STATE.claims;
+    const roles = c.realm_access?.roles || [];
+
+    document.getElementById('modal-claim-sub').textContent = (c.sub || '').slice(0, 18) + '...';
+    document.getElementById('modal-claim-user').textContent = c.preferred_username || '-';
+    document.getElementById('modal-claim-aud').textContent = Array.isArray(c.aud) ? c.aud.join(', ') : c.aud || '-';
+
+    document.getElementById('modal-claim-roles').innerHTML = roles
+      .filter(r => !['default-roles-authlab', 'offline_access', 'uma_authorization'].includes(r))
+      .map(r => `<span class="badge ${r.toLowerCase().includes('admin') ? 'badge-amber' : 'badge-blue'}">${escapeHtml(r)}</span>`)
+      .join(' ') || '<span class="text-muted">None</span>';
+
+    const expSec = Math.max(0, (c.exp || 0) - Math.floor(Date.now() / 1000));
+    document.getElementById('modal-claim-exp').textContent = `${expSec}s remaining`;
+
+    document.getElementById('modal-raw-json').textContent = JSON.stringify({
+      header: STATE.header,
+      payload: STATE.claims,
+    }, null, 2);
+  }
+}
+
+function copyTokenToClipboard() {
+  if (!STATE.token) return;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(STATE.token)
+      .then(() => showToast('📋 Copied active Bearer token to clipboard!'))
+      .catch(() => fallbackCopy(STATE.token));
+  } else {
+    fallbackCopy(STATE.token);
+  }
+}
+
+function fallbackCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+  showToast('📋 Copied active Bearer token to clipboard!');
+}
+
+// ============================================================================
+// ATTACK SUITE SIMULATIONS
 // ============================================================================
 
 function b64Encode(str) {
@@ -287,7 +536,7 @@ function clearAttackConsole() {
 async function testAttackNone() {
   clearAttackConsole();
   logAttack('=== EXPLOIT 1: alg: "none" Signature Stripping Test ===');
-  
+
   const header = { alg: 'none', typ: 'JWT' };
   const payload = {
     iss: `http://localhost:8080/realms/${CONFIG.realm}`,
@@ -308,10 +557,10 @@ async function testAttackNone() {
     });
     const data = await resp.json().catch(() => ({}));
     if (resp.status === 401 || resp.status === 503) {
-      logAttack(`🛡️ SECURE VERIFIER RESULT: BLOCKED! HTTP ${resp.status} (${data.error || 'invalid_token'})`);
-      logAttack('Explanation: The API uses algorithms=["RS256"]. The alg header is NEVER trusted.');
+      logAttack(`🛡️ SECURE VERIFIER RESULT: BLOCKED! HTTP ${resp.status} (${data.detail || data.error || 'invalid_token'})`);
+      logAttack('Explanation: The API specifies algorithms=["RS256"]. The alg header is NEVER trusted.');
     } else {
-      logAttack(`💥 EXPLOIT SUCCEEDED (Vulnerable!): HTTP ${resp.status}`);
+      logAttack(`💥 EXPLOIT SUCCEEDED: HTTP ${resp.status}`);
     }
   } catch (err) {
     logAttack(`Network error: ${err.message}`);
@@ -339,7 +588,6 @@ async function testAttackKeyConfusion() {
       exp: Math.floor(Date.now() / 1000) + 3600,
     };
 
-    // Simulated HMAC signed with public modulus
     const fakeSig = b64Encode('simulated_hmac_signature_with_public_key');
     const forgedToken = `${b64Encode(JSON.stringify(header))}.${b64Encode(JSON.stringify(payload))}.${fakeSig}`;
 
@@ -349,8 +597,8 @@ async function testAttackKeyConfusion() {
     });
     const data = await resp.json().catch(() => ({}));
     if (resp.status === 401 || resp.status === 503) {
-      logAttack(`🛡️ SECURE VERIFIER RESULT: BLOCKED! HTTP ${resp.status} (${data.error || 'invalid_token'})`);
-      logAttack('Explanation: The verifier pins RS256. Symmetric HMAC tokens are rejected outright.');
+      logAttack(`🛡️ SECURE VERIFIER RESULT: BLOCKED! HTTP ${resp.status} (${data.detail || data.error || 'invalid_token'})`);
+      logAttack('Explanation: The API verifier pins RS256. Symmetric HMAC algorithms are rejected outright.');
     } else {
       logAttack(`💥 EXPLOIT SUCCEEDED: HTTP ${resp.status}`);
     }
@@ -363,7 +611,7 @@ async function testAttackTamper() {
   clearAttackConsole();
   logAttack('=== EXPLOIT 3: Payload Tampering (Signature Check) ===');
   if (!STATE.token) {
-    logAttack('⚠️ Please sign in as Alice first using the Quick Sign-In buttons!');
+    logAttack('⚠️ Please sign in first before testing token tampering.');
     return;
   }
 
@@ -371,12 +619,11 @@ async function testAttackTamper() {
   const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
   logAttack(`Original roles: ${JSON.stringify(payload.realm_access?.roles)}`);
 
-  // Tamper roles
   payload.realm_access = { roles: ['admin', 'Admin'] };
   const tamperedPayloadB64 = b64Encode(JSON.stringify(payload));
   const tamperedToken = `${parts[0]}.${tamperedPayloadB64}.${parts[2]}`;
 
-  logAttack('Altered payload to include ["admin"] without re-signing with private RSA key.');
+  logAttack('Altered payload to include ["admin"] without re-signing with Keycloak private RSA key.');
   logAttack('Sending tampered token to Resource API: GET /api/admin/users ...');
 
   try {
@@ -385,7 +632,7 @@ async function testAttackTamper() {
     });
     const data = await resp.json().catch(() => ({}));
     logAttack(`🛡️ SECURE VERIFIER RESULT: BLOCKED! HTTP ${resp.status} (${data.detail || data.error})`);
-    logAttack('Explanation: RSA signature verification failed because the cryptographic hash was altered.');
+    logAttack('Explanation: Cryptographic RSA signature check failed because payload contents changed.');
   } catch (err) {
     logAttack(`Network error: ${err.message}`);
   }
@@ -400,7 +647,7 @@ async function testAttackExpired() {
     iss: `http://localhost:8080/realms/${CONFIG.realm}`,
     aud: 'authlab-api',
     sub: 'old_session',
-    exp: Math.floor(Date.now() / 1000) - 7200, // 2 hours ago
+    exp: Math.floor(Date.now() / 1000) - 7200,
   };
 
   const fakeExpired = `${b64Encode(JSON.stringify(header))}.${b64Encode(JSON.stringify(payload))}.fakesig`;
@@ -411,7 +658,7 @@ async function testAttackExpired() {
       headers: { Authorization: `Bearer ${fakeExpired}` },
     });
     const data = await resp.json().catch(() => ({}));
-    logAttack(`🛡️ SECURE VERIFIER RESULT: BLOCKED! HTTP ${resp.status} (${data.error || 'invalid_token'})`);
+    logAttack(`🛡️ SECURE VERIFIER RESULT: BLOCKED! HTTP ${resp.status} (${data.detail || data.error || 'invalid_token'})`);
   } catch (err) {
     logAttack(`Network error: ${err.message}`);
   }
@@ -432,7 +679,7 @@ async function runAllAttackTests() {
 }
 
 // ============================================================================
-// TAB 3: LIVE JWKS INSPECTOR
+// LIVE JWKS EXPLORER
 // ============================================================================
 
 async function fetchLiveJwks() {
@@ -473,7 +720,7 @@ async function fetchLiveJwks() {
           </div>
           <div class="jwk-row">
             <span>Private Key (d):</span>
-            <code style="color: #34d399;">WITHHELD (Secure)</code>
+            <code style="color: #34d399;">WITHHELD (Secure on Keycloak)</code>
           </div>
         </div>
       `)
@@ -489,8 +736,24 @@ async function fetchLiveJwks() {
 
 window.addEventListener('DOMContentLoaded', async () => {
   await checkKeycloakStatus();
-  if (STATE.token) {
-    updateTokenDisplay();
-  }
-});
 
+  // If a valid session token exists, restore dashboard
+  if (STATE.token) {
+    const parsed = decodeJwt(STATE.token);
+    if (parsed && !isTokenExpired(parsed.payload)) {
+      STATE.header = parsed.header;
+      STATE.claims = parsed.payload;
+      STATE.currentUser = parsed.payload.preferred_username;
+      showDashboardView();
+      await loadDashboardData();
+      return;
+    } else {
+      // Clear expired token
+      sessionStorage.removeItem('phase2_token');
+      STATE.token = null;
+    }
+  }
+
+  // Otherwise show login view
+  showAuthView();
+});

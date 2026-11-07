@@ -79,27 +79,115 @@ def health():
 
 @app.get("/api/public")
 def public():
-    return jsonify(message="No token needed")
+    return jsonify(
+        message="Public Resource: No authentication required",
+        status="online",
+        realm="Authlab",
+    )
 
 
 @app.get("/api/me")
 @require_auth()
 def me():
     c = g.claims
-    return jsonify(sub=c["sub"], username=c.get("preferred_username"),
-                   roles=c.get("realm_access", {}).get("roles", []), exp=c["exp"])
+    roles = c.get("realm_access", {}).get("roles", [])
+    clean_roles = [
+        r for r in roles
+        if r not in ("default-roles-authlab", "offline_access", "uma_authorization")
+    ]
+    primary_role = (
+        "admin" if any(r.lower() == "admin" for r in roles)
+        else "developer" if any(r.lower() == "developer" for r in roles)
+        else "viewer"
+    )
+    return jsonify(
+        sub=c["sub"],
+        username=c.get("preferred_username"),
+        name=c.get("name") or c.get("preferred_username"),
+        email=c.get("email", ""),
+        primary_role=primary_role,
+        roles=clean_roles,
+        exp=c["exp"],
+        iss=c.get("iss"),
+        aud=c.get("aud"),
+    )
 
 
 @app.get("/api/users")
 @require_auth("viewer", "developer", "admin")
 def users():
-    return jsonify(users=[{"id": 1024, "name": "demo"}])
+    """Tier 1: Accessible by Viewer (User), Developer, and Admin."""
+    return jsonify(
+        access_tier="Tier 1: General Reader Workspace",
+        authorized_user=g.claims.get("preferred_username"),
+        directory=[
+            {"id": 101, "name": "Alice User", "username": "alice", "clearance": "Reader (L1)", "email": "alice@authlab.local", "status": "Active"},
+            {"id": 102, "name": "Drench Dev", "username": "drench", "clearance": "Developer (L2)", "email": "drench@authlab.local", "status": "Active"},
+            {"id": 103, "name": "Bob Admin", "username": "bob", "clearance": "Admin (L3)", "email": "bob@authlab.local", "status": "Active"},
+        ],
+        knowledge_base=[
+            {"id": "KB-201", "title": "OAuth 2.0 / OIDC Architecture Overview", "category": "Architecture", "version": "v2.6", "updated": "2026-11-06"},
+            {"id": "KB-202", "title": "RS256 Signature Verification via JWKS", "category": "Security Guide", "version": "v1.4", "updated": "2026-11-06"},
+            {"id": "KB-203", "title": "Platform Service Health & Incident SLA", "category": "Operations", "version": "99.98% Uptime", "updated": "Today"},
+        ],
+    )
+
+
+@app.get("/api/developer/config")
+@require_auth("developer", "admin")
+def developer_config():
+    """Tier 2: Accessible ONLY by Developer and Admin."""
+    return jsonify(
+        access_tier="Tier 2: Developer Configuration & Pipelines",
+        authorized_developer=g.claims.get("preferred_username"),
+        environment="staging-eu-west-1",
+        feature_flags={
+            "ENABLE_ASYNC_PIPELINE": True,
+            "CANARY_DEPLOYMENT_WEIGHT": 25,
+            "DEBUG_TRACE_SAMPLING": False,
+            "ENFORCE_STRICT_RATE_LIMITS": True,
+        },
+        services_topology=[
+            {"name": "auth-service", "host": "keycloak:8080", "protocol": "OIDC", "status": "Healthy"},
+            {"name": "resource-api", "host": "api:5000", "protocol": "REST / RS256", "status": "Healthy"},
+            {"name": "postgres-cluster", "host": "postgres:5432", "protocol": "TCP", "status": "Healthy"},
+        ],
+        build_pipeline={
+            "last_commit": "1d29755",
+            "branch": "main",
+            "tests_passed": 16,
+            "code_coverage": "100%",
+        },
+    )
 
 
 @app.get("/api/admin/users")
 @require_auth("admin")
 def admin_users():
-    return jsonify(message="Admin area", requested_by=g.claims.get("preferred_username"))
+    """Tier 3: Accessible ONLY by Admin."""
+    return jsonify(
+        access_tier="Tier 3: Administrator Security & Governance Control Center",
+        requested_by=g.claims.get("preferred_username"),
+        system_governance={
+            "realm": "Authlab",
+            "token_algorithm": "RS256 (RSA 2048-bit)",
+            "token_ttl_seconds": 300,
+            "jwks_active_keys": 2,
+            "zero_trust_policy": "Strict Audience + Issuer Pinning Enforced",
+        },
+        security_audit_log=[
+            {"id": "EV-941", "timestamp": "Just now", "action": "ADMIN_CONTROL_ACCESSED", "actor": g.claims.get("preferred_username"), "status": "SUCCESS"},
+            {"id": "EV-940", "timestamp": "10 mins ago", "action": "TOKEN_ISSUED_RS256", "actor": "alice", "status": "SUCCESS"},
+            {"id": "EV-939", "timestamp": "14 mins ago", "action": "UNAUTHORIZED_ADMIN_ATTEMPT", "actor": "alice", "status": "BLOCKED_403"},
+            {"id": "EV-938", "timestamp": "1 hour ago", "action": "JWKS_KEY_ROTATION_CHECK", "actor": "system", "status": "VERIFIED"},
+        ],
+        privileged_actions=[
+            "Revoke Active User Tokens",
+            "Rotate Identity Provider RSA Keys",
+            "Enforce Global Session Termination",
+            "Export Audit Logs to Security Information and Event Management (SIEM)",
+        ],
+    )
 
 
 @app.get("/")
