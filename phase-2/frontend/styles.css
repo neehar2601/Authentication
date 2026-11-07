@@ -1154,3 +1154,126 @@ code {
   font-weight: 600;
   color: #fff;
 }
+
+/* ============================================================================
+   LIVE AUDIT & ATTACK LOGS VIEWER
+   ============================================================================ */
+.logs-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.auto-refresh-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.audit-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+@media (max-width: 900px) {
+  .audit-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 500px) {
+  .audit-stats-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.stat-card {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 0.85rem 1.15rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.stat-card-danger {
+  border-left: 4px solid var(--danger);
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.stat-card-amber {
+  border-left: 4px solid var(--amber);
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.stat-card-green {
+  border-left: 4px solid var(--emerald);
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.stat-label {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.stat-value {
+  font-size: 1.55rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: #fff;
+}
+
+.logs-filter-bar {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 0.5rem 0 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.log-filter-btn {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s ease;
+}
+
+.log-filter-btn:hover {
+  color: #fff;
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.log-filter-btn.active {
+  background: linear-gradient(135deg, var(--primary), var(--primary-hover));
+  color: #fff;
+  border-color: var(--primary);
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.25);
+}
+
+.audit-table {
+  font-size: 0.78rem;
+}
+
+.audit-table td {
+  padding: 0.65rem 0.75rem;
+  vertical-align: middle;
+}
+

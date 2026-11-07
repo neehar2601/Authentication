@@ -79,9 +79,28 @@ Once logged in, the dashboard dynamically unlocks workspace tiers according to t
 - **Token Inspector Modal**: Click **Inspect Token** in the top navigation to view decoded JWT claims (`sub`, `iss`, `aud`, `exp`, `realm_access.roles`) and copy the raw Bearer token.
 - **Sign Out**: One-click session termination that clears tokens and returns to the Login Page.
 
+### 4. 📜 Real-Time Security & Attack Audit Logging
+Phase 2 features a comprehensive security logging subsystem that captures every access attempt, privilege evaluation, and blocked attack vector:
+- **Logged Event Classifications**:
+  - 🟢 **`ACCESS_GRANTED`** (`HTTP 200`): Successful token validation and role clearance match.
+  - 🚫 **`RBAC_ACCESS_DENIED`** (`HTTP 403`): Valid identity, but user lacked necessary roles (e.g. Alice attempting to access Developer or Admin APIs).
+  - 🚨 **`ATTACK_SIGNATURE_STRIPPING`** (`HTTP 401`): Exploit using `alg: "none"` with empty signature blocked by RS256 algorithm pinning.
+  - 🚨 **`ATTACK_KEY_CONFUSION`** (`HTTP 401`): Exploit using `alg: "HS256"` (CVE-2015-9235) with RSA public key blocked.
+  - 🚨 **`ATTACK_PAYLOAD_TAMPERING`** (`HTTP 401`): Token payload modified in transit without valid Keycloak RSA private signature.
+  - 🟡 **`TOKEN_EXPIRED_REPLAY`** (`HTTP 401`): Replay of expired access tokens caught by timestamp enforcement.
+- **Where to View Audit Logs**:
+  1. **Interactive Web UI**: Open the **📜 Live Security & Attack Logs** tab on [http://localhost:3000](http://localhost:3000) (includes live filter pills, summary metrics, auto-refresh, and reset buttons).
+  2. **CLI / Terminal Stream**: Stream logs in real time via:
+     ```bash
+     docker logs -f phase-2-api-1
+     # or: docker compose logs -f api
+     ```
+  3. **REST Endpoint**: Query `GET http://localhost:5000/api/audit-logs?filter=attacks` or `GET http://localhost:5000/api/audit-logs?filter=all`.
+  4. **Tier 3 Admin Workspace**: Live audit events are automatically integrated into Bob's Admin Control Center.
+
 ---
 
-### 2. 💥 JWT Attack & Defense Simulator Tab
+### 5. 💥 JWT Attack & Defense Simulator Tab
 Simulates real-world JWT attacks in your browser and contrasts **naive verifiers** against **hardened verifiers**:
 - **Exploit 1: `alg: "none"` Signature Stripping**:
   Forges a token with `{"alg": "none"}` and empty signature. Shows why naive verifiers are fooled and how RS256 pinning blocks it.
@@ -94,7 +113,7 @@ Simulates real-world JWT attacks in your browser and contrasts **naive verifiers
 
 ---
 
-### 3. 🔑 Live JWKS & Key Inspector Tab
+### 6. 🔑 Live JWKS & Key Inspector Tab
 - Fetches and visualizes active public keys in real time from Keycloak:
   `http://localhost:8080/realms/Authlab/protocol/openid-connect/certs`
 - Shows Key ID (`kid`), Algorithm (`RS256`), Key Type (`RSA`), and verifies that private key components (`d`) are strictly withheld.

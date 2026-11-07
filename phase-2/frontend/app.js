@@ -1,6 +1,7 @@
 /**
  * AuthLab Phase 2 — Privilege-Based Portal Controller
  * Integrates with Keycloak (Realm: Authlab) and Resource API (:5000)
+ * Features live cryptographic attack simulation and full security audit logging.
  */
 
 const CONFIG = {
@@ -16,6 +17,8 @@ const STATE = {
   header: null,
   currentUser: null,
   jwks: null,
+  auditFilter: 'all',
+  autoRefreshTimer: null,
 };
 
 function escapeHtml(str) {
@@ -103,7 +106,7 @@ function showDashboardView() {
 async function login(username, password) {
   const submitBtn = document.getElementById('login-submit-btn');
   const alertEl = document.getElementById('login-alert');
-  
+
   if (alertEl) {
     alertEl.classList.add('hidden');
     alertEl.textContent = '';
@@ -228,10 +231,10 @@ async function loadDashboardData() {
   // 2. Update Hero Privilege Banner
   const displayName = c.name || c.preferred_username || 'User';
   document.getElementById('hero-title').textContent = `Welcome, ${displayName}!`;
-  
+
   if (isAdmin) {
     document.getElementById('hero-desc').innerHTML =
-      `You are authenticated with <strong>Administrator (Level 3)</strong> clearance. You have unhindered access to <strong>all 3 privilege tiers</strong>, including system security governance and audit logs.`;
+      `You are authenticated with <strong>Administrator (Level 3)</strong> clearance. You have unhindered access to <strong>all 3 privilege tiers</strong>, including system security governance and live audit logs.`;
   } else if (isDeveloper) {
     document.getElementById('hero-desc').innerHTML =
       `You are authenticated with <strong>Developer (Level 2)</strong> clearance. You have access to Tier 1 and Tier 2 (staging configs, microservice topology, and feature flags). Tier 3 is restricted to Admins.`;
@@ -290,6 +293,9 @@ async function loadDashboardData() {
     document.getElementById('tier-3-unlocked').classList.add('hidden');
     document.getElementById('tier-3-locked').classList.remove('hidden');
   }
+
+  // 7. Refresh Live Audit Logs
+  fetchAuditLogs();
 }
 
 // Tier 1 Fetcher
@@ -404,18 +410,27 @@ async function loadTier3Data() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
 
-    // Audit Log
-    auditEl.innerHTML = (data.security_audit_log || []).map(log => `
-      <div class="audit-log-row">
-        <div>
-          <code>${escapeHtml(log.id)}</code> &bull; <strong>${escapeHtml(log.action)}</strong>
-          <div class="text-xs text-muted">Actor: ${escapeHtml(log.actor)} &bull; ${escapeHtml(log.timestamp)}</div>
+    // Audit Log (populated directly from live server events)
+    auditEl.innerHTML = (data.security_audit_log || []).map(log => {
+      let badgeClass = 'badge-blue';
+      if ((log.event_type || '').startsWith('ATTACK_')) badgeClass = 'badge-red';
+      else if (log.status_code === 403) badgeClass = 'badge-amber';
+      else if (log.status_code === 200) badgeClass = 'badge-green';
+
+      const statusBadge = log.status_code === 200 ? 'badge-green' : (log.status_code === 403 ? 'badge-amber' : 'badge-red');
+
+      return `
+        <div class="audit-log-row">
+          <div>
+            <code>${escapeHtml(log.id)}</code> &bull; <span class="badge ${badgeClass}">${escapeHtml(log.event_type || log.action)}</span>
+            <div class="text-xs text-muted">Actor: <strong>${escapeHtml(log.actor)}</strong> &bull; Target: <code>${escapeHtml(log.endpoint || '-')}</code> &bull; ${escapeHtml(log.timestamp)}</div>
+          </div>
+          <span class="badge ${statusBadge}">
+            HTTP ${escapeHtml(log.status_code || log.status)}
+          </span>
         </div>
-        <span class="badge ${log.status.includes('SUCCESS') || log.status.includes('VERIFIED') ? 'badge-green' : 'badge-red'}">
-          ${escapeHtml(log.status)}
-        </span>
-      </div>
-    `).join('');
+      `;
+    }).join('');
 
     // System Governance
     const g = data.system_governance || {};
@@ -433,8 +448,8 @@ async function loadTier3Data() {
         <strong>${escapeHtml(g.jwks_active_keys)} Keys Published</strong>
       </div>
       <div class="governance-item">
-        <span>Zero-Trust Policy</span>
-        <strong class="text-green">Strict Enforced</strong>
+        <span>Total Audit Events</span>
+        <strong class="text-green">${escapeHtml(g.total_audit_events || 0)} Recorded</strong>
       </div>
     `;
 
@@ -445,10 +460,116 @@ async function loadTier3Data() {
 
 function triggerAdminAction(actionName) {
   showToast(`⚙️ <strong>Admin Action Executed:</strong> ${escapeHtml(actionName)} verified successfully against Keycloak realm policy.`);
+  fetchAuditLogs();
 }
 
 // ============================================================================
-// SUBTABS (WORKSPACES, ATTACKS, JWKS)
+// LIVE SECURITY & ATTACK AUDIT LOGS
+// ============================================================================
+
+async function fetchAuditLogs() {
+  const tbody = document.getElementById('audit-logs-tbody');
+  if (!tbody) return;
+
+  try {
+    const resp = await fetch(`${CONFIG.apiUrl}/api/audit-logs?filter=${STATE.auditFilter}&limit=100`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+
+    // Update stats
+    const s = data.summary || {};
+    const totalEl = document.getElementById('stat-total-events');
+    const attacksEl = document.getElementById('stat-attacks-blocked');
+    const deniedEl = document.getElementById('stat-forbidden-denied');
+    const grantedEl = document.getElementById('stat-access-granted');
+
+    if (totalEl) totalEl.textContent = s.total_events || 0;
+    if (attacksEl) attacksEl.textContent = s.attacks_blocked || 0;
+    if (deniedEl) deniedEl.textContent = s.forbidden_blocked || 0;
+    if (grantedEl) grantedEl.textContent = s.access_granted || 0;
+
+    const events = data.events || [];
+    if (events.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted" style="padding: 2rem;">No audit events matching current filter (${escapeHtml(STATE.auditFilter)}).</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = events.map(ev => {
+      let badgeClass = 'badge-blue';
+      let statusBadge = 'badge-green';
+
+      if (ev.event_type.startsWith('ATTACK_')) {
+        badgeClass = 'badge-red';
+      } else if (ev.event_type.includes('DENIED') || ev.status_code === 403) {
+        badgeClass = 'badge-amber';
+      } else if (ev.event_type.includes('EXPIRED') || ev.status_code === 401) {
+        badgeClass = 'badge-purple';
+      } else if (ev.event_type === 'ACCESS_GRANTED') {
+        badgeClass = 'badge-green';
+      }
+
+      if (ev.status_code >= 400 && ev.status_code < 500) {
+        statusBadge = ev.status_code === 403 ? 'badge-amber' : 'badge-red';
+      } else if (ev.status_code >= 500) {
+        statusBadge = 'badge-red';
+      }
+
+      const rolesStr = (ev.roles && ev.roles.length) ? ` <span class="text-xs text-muted">(${ev.roles.join(', ')})</span>` : '';
+
+      return `
+        <tr>
+          <td><code>${escapeHtml(ev.id)}</code></td>
+          <td><span class="text-xs text-muted">${escapeHtml(ev.timestamp)}</span></td>
+          <td><span class="badge ${badgeClass}">${escapeHtml(ev.event_type)}</span></td>
+          <td><strong>${escapeHtml(ev.actor)}</strong>${rolesStr}</td>
+          <td><code>${escapeHtml(ev.method)} ${escapeHtml(ev.endpoint)}</code></td>
+          <td><span class="badge ${statusBadge}">${escapeHtml(ev.status_code)}</span></td>
+          <td><span class="text-xs text-secondary">${escapeHtml(ev.detail)}</span></td>
+        </tr>
+      `;
+    }).join('');
+
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-danger text-center">Failed to fetch audit logs: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+function setAuditLogFilter(filterName) {
+  STATE.auditFilter = filterName;
+  document.querySelectorAll('.log-filter-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.filter === filterName);
+  });
+  fetchAuditLogs();
+}
+
+function toggleAutoRefresh(enabled) {
+  if (STATE.autoRefreshTimer) {
+    clearInterval(STATE.autoRefreshTimer);
+    STATE.autoRefreshTimer = null;
+  }
+  if (enabled) {
+    STATE.autoRefreshTimer = setInterval(() => {
+      const dView = document.getElementById('dashboard-view');
+      if (dView && !dView.classList.contains('hidden')) {
+        fetchAuditLogs();
+      }
+    }, 3000);
+  }
+}
+
+async function clearServerAuditLogs() {
+  try {
+    const resp = await fetch(`${CONFIG.apiUrl}/api/audit-logs/clear`, { method: 'POST' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    await fetchAuditLogs();
+    showToast('🗑️ Server audit logs have been reset.');
+  } catch (err) {
+    showToast(`❌ Failed to clear logs: ${escapeHtml(err.message)}`);
+  }
+}
+
+// ============================================================================
+// SUBTABS (WORKSPACES, ATTACKS, AUDIT LOGS, JWKS)
 // ============================================================================
 
 function switchSubTab(subtabId) {
@@ -458,7 +579,10 @@ function switchSubTab(subtabId) {
   document.querySelectorAll('.subtab-content').forEach(c => {
     c.classList.toggle('active', c.id === subtabId);
   });
-  if (subtabId === 'view-jwks' && !STATE.jwks) {
+
+  if (subtabId === 'view-logs') {
+    fetchAuditLogs();
+  } else if (subtabId === 'view-jwks' && !STATE.jwks) {
     fetchLiveJwks();
   }
 }
@@ -558,13 +682,15 @@ async function testAttackNone() {
     const data = await resp.json().catch(() => ({}));
     if (resp.status === 401 || resp.status === 503) {
       logAttack(`🛡️ SECURE VERIFIER RESULT: BLOCKED! HTTP ${resp.status} (${data.detail || data.error || 'invalid_token'})`);
-      logAttack('Explanation: The API specifies algorithms=["RS256"]. The alg header is NEVER trusted.');
+      logAttack('Explanation: The API verifier rejects alg: "none" outright. RS256 algorithm pinning is strictly enforced.');
+      logAttack('[SERVER AUDIT] 🛡️ Exploit recorded in server Security Audit Trail: ATTACK_SIGNATURE_STRIPPING (HTTP 401)');
     } else {
       logAttack(`💥 EXPLOIT SUCCEEDED: HTTP ${resp.status}`);
     }
   } catch (err) {
     logAttack(`Network error: ${err.message}`);
   }
+  fetchAuditLogs();
 }
 
 async function testAttackKeyConfusion() {
@@ -599,12 +725,14 @@ async function testAttackKeyConfusion() {
     if (resp.status === 401 || resp.status === 503) {
       logAttack(`🛡️ SECURE VERIFIER RESULT: BLOCKED! HTTP ${resp.status} (${data.detail || data.error || 'invalid_token'})`);
       logAttack('Explanation: The API verifier pins RS256. Symmetric HMAC algorithms are rejected outright.');
+      logAttack('[SERVER AUDIT] 🛡️ Exploit recorded in server Security Audit Trail: ATTACK_KEY_CONFUSION (HTTP 401)');
     } else {
       logAttack(`💥 EXPLOIT SUCCEEDED: HTTP ${resp.status}`);
     }
   } catch (err) {
     logAttack(`Network error: ${err.message}`);
   }
+  fetchAuditLogs();
 }
 
 async function testAttackTamper() {
@@ -633,9 +761,11 @@ async function testAttackTamper() {
     const data = await resp.json().catch(() => ({}));
     logAttack(`🛡️ SECURE VERIFIER RESULT: BLOCKED! HTTP ${resp.status} (${data.detail || data.error})`);
     logAttack('Explanation: Cryptographic RSA signature check failed because payload contents changed.');
+    logAttack('[SERVER AUDIT] 🛡️ Exploit recorded in server Security Audit Trail: ATTACK_PAYLOAD_TAMPERING (HTTP 401)');
   } catch (err) {
     logAttack(`Network error: ${err.message}`);
   }
+  fetchAuditLogs();
 }
 
 async function testAttackExpired() {
@@ -659,9 +789,11 @@ async function testAttackExpired() {
     });
     const data = await resp.json().catch(() => ({}));
     logAttack(`🛡️ SECURE VERIFIER RESULT: BLOCKED! HTTP ${resp.status} (${data.detail || data.error || 'invalid_token'})`);
+    logAttack('[SERVER AUDIT] 🛡️ Expired token replay recorded in server Security Audit Trail!');
   } catch (err) {
     logAttack(`Network error: ${err.message}`);
   }
+  fetchAuditLogs();
 }
 
 async function runAllAttackTests() {
@@ -675,7 +807,8 @@ async function runAllAttackTests() {
   logAttack('\n--------------------------------------------------------------\n');
   await testAttackExpired();
   logAttack('\n==============================================================');
-  logAttack('✅ ALL ATTACK VECTOR SIMULATIONS COMPLETED!');
+  logAttack('✅ ALL ATTACK VECTOR SIMULATIONS COMPLETED & RECORDED IN AUDIT LOG!');
+  fetchAuditLogs();
 }
 
 // ============================================================================
@@ -736,6 +869,9 @@ async function fetchLiveJwks() {
 
 window.addEventListener('DOMContentLoaded', async () => {
   await checkKeycloakStatus();
+
+  // Start auto-refresh polling for audit logs
+  toggleAutoRefresh(true);
 
   // If a valid session token exists, restore dashboard
   if (STATE.token) {

@@ -1,9 +1,13 @@
-"""AuthLab resource API: validates Keycloak access tokens and enforces roles."""
+"""AuthLab resource API: validates Keycloak access tokens, enforces roles, and records security audit logs."""
+import collections
+import logging
 import os
+import sys
+from datetime import datetime, timezone
 from functools import wraps
 
 import jwt
-from flask import Flask, g, jsonify, request
+from flask import Flask, g, jsonify, request, has_request_context
 from jwt import PyJWKClient
 
 ISSUER = os.environ["TOKEN_ISSUER"]
@@ -13,6 +17,102 @@ AUDIENCE = os.environ.get("API_AUDIENCE", "authlab-api")
 app = Flask(__name__)
 jwks = PyJWKClient(JWKS_URL, cache_keys=True)  # caches signing keys, refetches on unknown kid
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "frontend")
+
+# ============================================================================
+# STRUCTURED SECURITY AUDIT LOGGER
+# ============================================================================
+
+security_logger = logging.getLogger("authlab.security")
+security_logger.setLevel(logging.INFO)
+
+if not security_logger.handlers:
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(
+        logging.Formatter(
+            "[%(asctime)s] [%(levelname)s] [SECURITY_AUDIT] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    )
+    security_logger.addHandler(console_handler)
+
+AUDIT_LOG_BUFFER = collections.deque(maxlen=250)
+EVENT_COUNTER = 0
+
+
+def record_security_event(
+    event_type: str,
+    severity: str,
+    actor: str,
+    endpoint: str,
+    method: str,
+    status_code: int,
+    detail: str,
+    roles: list = None,
+    client_ip: str = None,
+):
+    """Logs security access attempts and cryptographic attack vectors to stdout, file, and in-memory buffer."""
+    global EVENT_COUNTER
+    EVENT_COUNTER += 1
+    event_id = f"SEC-{EVENT_COUNTER:04d}"
+    now_utc = datetime.now(timezone.utc)
+    timestamp_str = now_utc.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+    if client_ip:
+        ip = client_ip
+    elif has_request_context():
+        ip = request.headers.get("X-Forwarded-For", request.remote_addr or "127.0.0.1")
+    else:
+        ip = "127.0.0.1"
+
+    event = {
+        "id": event_id,
+        "timestamp": timestamp_str,
+        "timestamp_epoch": int(now_utc.timestamp()),
+        "event_type": event_type,
+        "severity": severity,  # CRITICAL, HIGH, WARN, INFO
+        "actor": actor or "anonymous",
+        "roles": roles or [],
+        "endpoint": endpoint,
+        "method": method,
+        "status_code": status_code,
+        "ip": ip,
+        "detail": detail,
+    }
+
+    AUDIT_LOG_BUFFER.appendleft(event)
+
+    log_msg = (
+        f"{event_id} | {event_type} | {severity} | "
+        f"Actor: {event['actor']} | {method} {endpoint} | "
+        f"HTTP {status_code} | {detail}"
+    )
+
+    if severity == "CRITICAL":
+        security_logger.error(log_msg)
+    elif severity in ("HIGH", "WARN"):
+        security_logger.warning(log_msg)
+    else:
+        security_logger.info(log_msg)
+
+    try:
+        with open("/tmp/authlab_security.log", "a") as f:
+            f.write(f"[{timestamp_str}] [{severity}] {log_msg}\n")
+    except Exception:
+        pass
+
+    return event
+
+
+# Seed server initialization event
+record_security_event(
+    event_type="SYSTEM_INITIALIZED",
+    severity="INFO",
+    actor="system",
+    endpoint="/",
+    method="INIT",
+    status_code=200,
+    detail="AuthLab Phase 2 Security Verifier started with live RS256 JWKS enforcement",
+)
 
 
 @app.after_request
@@ -40,10 +140,110 @@ def require_auth(*roles):
         def wrapper(*a, **kw):
             header = request.headers.get("Authorization", "")
             if not header.startswith("Bearer "):
+                record_security_event(
+                    event_type="AUTH_TOKEN_MISSING",
+                    severity="WARN",
+                    actor="anonymous",
+                    endpoint=request.path,
+                    method=request.method,
+                    status_code=401,
+                    detail="Request missing Authorization: Bearer token header",
+                )
                 return err(401, "missing_token", "Send Authorization: Bearer <token>")
-            token = header[7:]
+
+            token = header[7:].strip()
+
+            # Pre-decode inspection for attack vector classification
+            unverified_header = {}
+            unverified_claims = {}
+            try:
+                unverified_header = jwt.get_unverified_header(token)
+            except Exception:
+                pass
+
+            try:
+                unverified_claims = jwt.decode(
+                    token,
+                    options={"verify_signature": False, "verify_exp": False, "verify_aud": False, "verify_iss": False},
+                )
+            except Exception:
+                pass
+
+            alg = unverified_header.get("alg")
+            actor_attempted = unverified_claims.get("preferred_username") or unverified_claims.get("sub") or "untrusted_client"
+
+            # -------------------------------------------------------------
+            # EXPLOIT DETECTION 1: alg: "none" Signature Stripping Attack
+            # -------------------------------------------------------------
+            if alg == "none":
+                record_security_event(
+                    event_type="ATTACK_SIGNATURE_STRIPPING",
+                    severity="CRITICAL",
+                    actor=actor_attempted,
+                    endpoint=request.path,
+                    method=request.method,
+                    status_code=401,
+                    detail='Signature stripping exploit (alg: "none") detected and blocked by RS256 algorithm pinning',
+                )
+                return err(401, "invalid_algorithm", 'Algorithm "none" is strictly forbidden. RS256 required.')
+
+            # -------------------------------------------------------------
+            # EXPLOIT DETECTION 2: alg: "HS256" Key Confusion (CVE-2015-9235)
+            # -------------------------------------------------------------
+            if alg == "HS256":
+                record_security_event(
+                    event_type="ATTACK_KEY_CONFUSION",
+                    severity="CRITICAL",
+                    actor=actor_attempted,
+                    endpoint=request.path,
+                    method=request.method,
+                    status_code=401,
+                    detail='Public key confusion exploit (CVE-2015-9235, alg: "HS256") detected and blocked: symmetric HMAC rejected on asymmetric RS256 endpoint',
+                )
+                return err(401, "invalid_algorithm", 'Algorithm "HS256" is strictly forbidden. RS256 required.')
+
+            # Ensure algorithm is strictly RS256
+            if alg != "RS256":
+                record_security_event(
+                    event_type="ATTACK_DISALLOWED_ALGORITHM",
+                    severity="HIGH",
+                    actor=actor_attempted,
+                    endpoint=request.path,
+                    method=request.method,
+                    status_code=401,
+                    detail=f'Disallowed algorithm: "{alg}". Verifier requires RS256 only.',
+                )
+                return err(401, "invalid_algorithm", f'Algorithm "{alg}" is forbidden. RS256 required.')
+
+            # -------------------------------------------------------------
+            # CRYPTOGRAPHIC KEY RETRIEVAL & SIGNATURE VERIFICATION
+            # -------------------------------------------------------------
             try:
                 key = jwks.get_signing_key_from_jwt(token).key
+            except jwt.exceptions.PyJWKClientError as e:
+                record_security_event(
+                    event_type="UNKNOWN_SIGNING_KEY",
+                    severity="HIGH",
+                    actor=actor_attempted,
+                    endpoint=request.path,
+                    method=request.method,
+                    status_code=401,
+                    detail=f"Token signed by unknown key ID (kid: {unverified_header.get('kid')}): not found in Keycloak JWKS",
+                )
+                return err(401, "invalid_key", "Signing key not found in identity provider JWKS")
+            except Exception as e:
+                record_security_event(
+                    event_type="IDP_COMMUNICATION_ERROR",
+                    severity="WARN",
+                    actor=actor_attempted,
+                    endpoint=request.path,
+                    method=request.method,
+                    status_code=503,
+                    detail=f"Could not reach Keycloak JWKS endpoint: {str(e)}",
+                )
+                return err(503, "jwks_unavailable", "Could not reach the identity provider")
+
+            try:
                 claims = jwt.decode(
                     token,
                     key,
@@ -53,19 +253,75 @@ def require_auth(*roles):
                     options={"require": ["exp", "iat", "iss", "aud", "sub"]},
                 )
             except jwt.ExpiredSignatureError:
+                record_security_event(
+                    event_type="TOKEN_EXPIRED_REPLAY",
+                    severity="WARN",
+                    actor=actor_attempted,
+                    endpoint=request.path,
+                    method=request.method,
+                    status_code=401,
+                    detail=f"Expired token presented for user '{actor_attempted}' (exp: {unverified_claims.get('exp')})",
+                )
                 return err(401, "token_expired", "Access token has expired")
-            except jwt.InvalidTokenError as e:
-                return err(401, "invalid_token", type(e).__name__)
-            except Exception:
-                return err(503, "jwks_unavailable", "Could not reach the identity provider")
 
+            except jwt.InvalidSignatureError:
+                record_security_event(
+                    event_type="ATTACK_PAYLOAD_TAMPERING",
+                    severity="CRITICAL",
+                    actor=actor_attempted,
+                    endpoint=request.path,
+                    method=request.method,
+                    status_code=401,
+                    detail=f"Cryptographic signature check failed: payload was modified in transit (claimed roles: {unverified_claims.get('realm_access', {}).get('roles')})",
+                )
+                return err(401, "invalid_token", "Invalid signature: token payload was altered")
+
+            except jwt.InvalidTokenError as e:
+                record_security_event(
+                    event_type="INVALID_TOKEN_ATTEMPT",
+                    severity="HIGH",
+                    actor=actor_attempted,
+                    endpoint=request.path,
+                    method=request.method,
+                    status_code=401,
+                    detail=f"Token validation failed: {type(e).__name__}",
+                )
+                return err(401, "invalid_token", type(e).__name__)
+
+            # -------------------------------------------------------------
+            # ROLE-BASED ACCESS CONTROL (RBAC) ENFORCEMENT
+            # -------------------------------------------------------------
             raw_roles = claims.get("realm_access", {}).get("roles", [])
             normalized_roles = set(r.lower() for r in raw_roles)
             if "user" in normalized_roles:
                 normalized_roles.add("viewer")
             required_roles = set(r.lower() for r in roles)
+            actor = claims.get("preferred_username") or claims.get("sub")
+
             if roles and not (required_roles & normalized_roles):
+                record_security_event(
+                    event_type="RBAC_ACCESS_DENIED",
+                    severity="HIGH",
+                    actor=actor,
+                    roles=list(raw_roles),
+                    endpoint=request.path,
+                    method=request.method,
+                    status_code=403,
+                    detail=f"Clearance violation: user '{actor}' has roles {list(raw_roles)}, but endpoint requires one of: {list(roles)}",
+                )
                 return err(403, "forbidden", f"Requires one of: {', '.join(roles)}")
+
+            # Access Approved
+            record_security_event(
+                event_type="ACCESS_GRANTED",
+                severity="INFO",
+                actor=actor,
+                roles=list(raw_roles),
+                endpoint=request.path,
+                method=request.method,
+                status_code=200,
+                detail=f"Access granted to {request.path} with verified RS256 token",
+            )
             g.claims = claims
             return fn(*a, **kw)
         return wrapper
@@ -79,6 +335,15 @@ def health():
 
 @app.get("/api/public")
 def public():
+    record_security_event(
+        event_type="PUBLIC_ACCESS",
+        severity="INFO",
+        actor="anonymous",
+        endpoint="/api/public",
+        method="GET",
+        status_code=200,
+        detail="Public unauthenticated resource requested",
+    )
     return jsonify(
         message="Public Resource: No authentication required",
         status="online",
@@ -165,6 +430,7 @@ def developer_config():
 @require_auth("admin")
 def admin_users():
     """Tier 3: Accessible ONLY by Admin."""
+    recent_logs = list(AUDIT_LOG_BUFFER)[:20]
     return jsonify(
         access_tier="Tier 3: Administrator Security & Governance Control Center",
         requested_by=g.claims.get("preferred_username"),
@@ -174,13 +440,10 @@ def admin_users():
             "token_ttl_seconds": 300,
             "jwks_active_keys": 2,
             "zero_trust_policy": "Strict Audience + Issuer Pinning Enforced",
+            "total_audit_events": len(AUDIT_LOG_BUFFER),
+            "attacks_intercepted": sum(1 for e in AUDIT_LOG_BUFFER if "ATTACK" in e["event_type"]),
         },
-        security_audit_log=[
-            {"id": "EV-941", "timestamp": "Just now", "action": "ADMIN_CONTROL_ACCESSED", "actor": g.claims.get("preferred_username"), "status": "SUCCESS"},
-            {"id": "EV-940", "timestamp": "10 mins ago", "action": "TOKEN_ISSUED_RS256", "actor": "alice", "status": "SUCCESS"},
-            {"id": "EV-939", "timestamp": "14 mins ago", "action": "UNAUTHORIZED_ADMIN_ATTEMPT", "actor": "alice", "status": "BLOCKED_403"},
-            {"id": "EV-938", "timestamp": "1 hour ago", "action": "JWKS_KEY_ROTATION_CHECK", "actor": "system", "status": "VERIFIED"},
-        ],
+        security_audit_log=recent_logs,
         privileged_actions=[
             "Revoke Active User Tokens",
             "Rotate Identity Provider RSA Keys",
@@ -188,6 +451,53 @@ def admin_users():
             "Export Audit Logs to Security Information and Event Management (SIEM)",
         ],
     )
+
+
+@app.get("/api/audit-logs")
+def get_audit_logs():
+    """Live security audit log endpoint for monitoring and dashboard integration."""
+    filter_type = request.args.get("filter", "all").lower()
+    limit = int(request.args.get("limit", 50))
+
+    events = list(AUDIT_LOG_BUFFER)
+
+    if filter_type == "attacks":
+        events = [e for e in events if "ATTACK" in e["event_type"] or "EXPIRED" in e["event_type"]]
+    elif filter_type == "denied":
+        events = [e for e in events if e["status_code"] in (401, 403)]
+    elif filter_type == "granted":
+        events = [e for e in events if e["status_code"] == 200]
+
+    summary = {
+        "total_events": len(AUDIT_LOG_BUFFER),
+        "attacks_blocked": sum(1 for e in AUDIT_LOG_BUFFER if "ATTACK" in e["event_type"]),
+        "forbidden_blocked": sum(1 for e in AUDIT_LOG_BUFFER if e["status_code"] == 403),
+        "access_granted": sum(1 for e in AUDIT_LOG_BUFFER if e["status_code"] == 200),
+        "expired_replays": sum(1 for e in AUDIT_LOG_BUFFER if "EXPIRED" in e["event_type"]),
+    }
+
+    return jsonify(
+        status="ok",
+        summary=summary,
+        total_matched=len(events),
+        events=events[:limit],
+    )
+
+
+@app.post("/api/audit-logs/clear")
+def clear_audit_logs():
+    """Clears the in-memory audit log buffer."""
+    AUDIT_LOG_BUFFER.clear()
+    record_security_event(
+        event_type="AUDIT_LOG_CLEARED",
+        severity="WARN",
+        actor="admin",
+        endpoint="/api/audit-logs/clear",
+        method="POST",
+        status_code=200,
+        detail="Security audit log buffer was reset by administrator",
+    )
+    return jsonify(status="ok", message="Audit logs cleared successfully")
 
 
 @app.get("/")

@@ -241,6 +241,9 @@
       <button type="button" class="subnav-tab" data-subtab="view-attacks" onclick="switchSubTab('view-attacks')">
         💥 JWT Attack &amp; Defense Simulator
       </button>
+      <button type="button" class="subnav-tab" data-subtab="view-logs" onclick="switchSubTab('view-logs')">
+        📜 Live Security &amp; Attack Logs
+      </button>
       <button type="button" class="subnav-tab" data-subtab="view-jwks" onclick="switchSubTab('view-jwks')">
         🔑 Keycloak Live JWKS
       </button>
@@ -464,11 +467,89 @@
 
         <!-- Attack Output Console -->
         <div style="margin-top: 1.25rem;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.5rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
             <strong class="text-xs text-muted">SIMULATION EXECUTION LOG:</strong>
-            <button type="button" class="btn btn-ghost btn-sm" onclick="clearAttackConsole()">Clear</button>
+            <div style="display: flex; gap: 0.4rem;">
+              <button type="button" class="btn btn-ghost btn-sm" onclick="clearAttackConsole()">Clear Console</button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="switchSubTab('view-logs')">📜 View in Server Audit Logs &rarr;</button>
+            </div>
           </div>
           <pre class="code-pre" id="attack-console-log">// Click any attack test above to see cryptographic execution...</pre>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===================================================================
+         SUBTAB 3: LIVE SECURITY & ATTACK AUDIT LOGS
+         =================================================================== -->
+    <div id="view-logs" class="subtab-content">
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h3>📜 Real-Time Security &amp; Attack Audit Log</h3>
+            <p class="text-sm text-muted">Live forensic stream capturing every access grant, privilege violation (403), and blocked cryptographic attack.</p>
+          </div>
+          <div class="logs-header-actions">
+            <label class="auto-refresh-label">
+              <input type="checkbox" id="auto-refresh-logs-toggle" onchange="toggleAutoRefresh(this.checked)" checked />
+              <span>Auto-refresh (3s)</span>
+            </label>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="fetchAuditLogs()">
+              🔄 Refresh Now
+            </button>
+            <button type="button" class="btn btn-outline-danger btn-sm" onclick="clearServerAuditLogs()">
+              🗑️ Reset Logs
+            </button>
+          </div>
+        </div>
+
+        <!-- Summary Stats Grid -->
+        <div class="audit-stats-grid">
+          <div class="stat-card">
+            <span class="stat-label">Total Logged Events</span>
+            <span class="stat-value" id="stat-total-events">0</span>
+          </div>
+          <div class="stat-card stat-card-danger">
+            <span class="stat-label">🚨 Attacks Blocked</span>
+            <span class="stat-value text-danger" id="stat-attacks-blocked">0</span>
+          </div>
+          <div class="stat-card stat-card-amber">
+            <span class="stat-label">🚫 403 Forbidden Denials</span>
+            <span class="stat-value text-amber" id="stat-forbidden-denied">0</span>
+          </div>
+          <div class="stat-card stat-card-green">
+            <span class="stat-label">🟢 Authorized Access</span>
+            <span class="stat-value text-green" id="stat-access-granted">0</span>
+          </div>
+        </div>
+
+        <!-- Filter Bar -->
+        <div class="logs-filter-bar">
+          <span class="text-xs text-muted" style="align-self: center; margin-right: 0.35rem;">Filter by:</span>
+          <button type="button" class="log-filter-btn active" data-filter="all" onclick="setAuditLogFilter('all')">All Events</button>
+          <button type="button" class="log-filter-btn" data-filter="attacks" onclick="setAuditLogFilter('attacks')">🚨 Attacks Only</button>
+          <button type="button" class="log-filter-btn" data-filter="denied" onclick="setAuditLogFilter('denied')">🚫 401 / 403 Denied</button>
+          <button type="button" class="log-filter-btn" data-filter="granted" onclick="setAuditLogFilter('granted')">🟢 200 Granted</button>
+        </div>
+
+        <!-- Events Table -->
+        <div class="table-responsive" style="margin-top: 1rem;">
+          <table class="data-table audit-table">
+            <thead>
+              <tr>
+                <th style="width: 100px;">Event ID</th>
+                <th style="width: 160px;">Timestamp</th>
+                <th style="width: 190px;">Classification</th>
+                <th style="width: 120px;">Actor</th>
+                <th style="width: 170px;">Target Endpoint</th>
+                <th style="width: 85px;">Status</th>
+                <th>Forensic Analysis &amp; Detail</th>
+              </tr>
+            </thead>
+            <tbody id="audit-logs-tbody">
+              <tr><td colspan="7" class="text-center text-muted">Loading live audit events from server...</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
